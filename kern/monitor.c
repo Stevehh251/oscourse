@@ -19,6 +19,7 @@
 int mon_help(int argc, char **argv, struct Trapframe *tf);
 int mon_kerninfo(int argc, char **argv, struct Trapframe *tf);
 int mon_backtrace(int argc, char **argv, struct Trapframe *tf);
+int print_some_text(int argc, char **argv, struct Trapframe *tf);
 
 struct Command {
     const char *name;
@@ -30,11 +31,18 @@ struct Command {
 static struct Command commands[] = {
         {"help", "Display this list of commands", mon_help},
         {"kerninfo", "Display information about the kernel", mon_kerninfo},
+        {"sometext", "Print some text", print_some_text},
         {"backtrace", "Print stack backtrace", mon_backtrace},
 };
 #define NCOMMANDS (sizeof(commands) / sizeof(commands[0]))
 
 /* Implementations of basic kernel monitor commands */
+
+int
+print_some_text(int argc, char **argv, struct Trapframe *tf) { 
+    cprintf("Ok, I printed some text\n");
+    return 0;
+}
 
 int
 mon_help(int argc, char **argv, struct Trapframe *tf) {
@@ -60,6 +68,21 @@ mon_kerninfo(int argc, char **argv, struct Trapframe *tf) {
 int
 mon_backtrace(int argc, char **argv, struct Trapframe *tf) {
     // LAB 2: Your code here
+    cprintf("Stack backtrace:\n");
+    uint64_t rbp = read_rbp();
+    while (rbp != 0) {
+        uint64_t *ptr = (uint64_t *) rbp;
+        uint64_t rip = ptr[1];
+        cprintf("  rbp %016lx rip %016lx\n", rbp, rip);
+        struct Ripdebuginfo info;
+        int error = debuginfo_rip((uintptr_t)rip, &info);
+        if (error == 0){
+            cprintf("    %s:%d: %*s+%lu\n", info.rip_file, info.rip_line, info.rip_fn_namelen, info.rip_fn_name, rip - info.rip_fn_addr);
+         } else {
+            cprintf("Error get rip");
+         }
+        rbp = *ptr;
+    }
 
     return 0;
 }
