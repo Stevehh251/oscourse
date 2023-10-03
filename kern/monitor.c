@@ -40,7 +40,7 @@ static struct Command commands[] = {
 /* Implementations of basic kernel monitor commands */
 
 int
-print_some_text(int argc, char **argv, struct Trapframe *tf) { 
+print_some_text(int argc, char **argv, struct Trapframe *tf) {
     cprintf("Ok, I printed some text\n");
     return 0;
 }
@@ -72,16 +72,16 @@ mon_backtrace(int argc, char **argv, struct Trapframe *tf) {
     cprintf("Stack backtrace:\n");
     uint64_t rbp = read_rbp();
     while (rbp != 0) {
-        uint64_t *ptr = (uint64_t *) rbp;
+        uint64_t *ptr = (uint64_t *)rbp;
         uint64_t rip = ptr[1];
         cprintf("  rbp %016lx rip %016lx\n", rbp, rip);
         struct Ripdebuginfo info;
         int error = debuginfo_rip((uintptr_t)rip, &info);
-        if (error == 0){
+        if (error == 0) {
             cprintf("    %s:%d: %*s+%lu\n", info.rip_file, info.rip_line, info.rip_fn_namelen, info.rip_fn_name, rip - info.rip_fn_addr);
-         } else {
+        } else {
             cprintf("Error get rip");
-         }
+        }
         rbp = *ptr;
     }
 

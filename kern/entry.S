@@ -70,7 +70,7 @@ sys_yield:
     call csys_yield
     jmp .
 
-# LAB 3: Your code here:
+# LAB 3_complete: Your code here:
 .globl sys_exit
 .type  sys_exit, @function
 sys_exit:
