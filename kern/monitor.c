@@ -105,19 +105,6 @@ mon_dumpcmos(int argc, char **argv, struct Trapframe *tf) {
     return 0;
 }
 
-// LAB 4: Your code here
-int
-mon_dumpcmos(int argc, char **argv, struct Trapframe *tf) {
-    // Dump CMOS memory in the following format:
-    // 00: 00 11 22 33 44 55 66 77 88 99 AA BB CC DD EE FF
-    // 10: 00 ..
-    // Make sure you understand the values read.
-    // Hint: Use cmos_read8()/cmos_write8() functions.
-    // LAB 4: Your code here
-
-    return 0;
-}
-
 /* Kernel monitor command interpreter */
 
 static int
