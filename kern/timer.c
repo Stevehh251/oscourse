@@ -86,7 +86,95 @@ acpi_find_table(const char *sign) {
      * HINT: RSDP address is stored in uefi_lp->ACPIRoot
      * HINT: You may want to distunguish RSDT/XSDT
      */
-    // LAB 5: Your code here:
+    // LAB 5_DONE: Your code here:
+    
+    static RSDT *rsdt = 0;
+    static int XSDT_mode = 0;
+
+    if (!rsdt) {
+        if (!uefi_lp->ACPIRoot)
+            panic("RSDP NOT FOUND\n");
+
+        RSDP *rsdp = mmio_map_region((physaddr_t)(uefi_lp->ACPIRoot), sizeof(*rsdp));
+
+        if (strncmp(rsdp->Signature, "RSD PTR ", 8))
+            panic("RSDP broken");
+
+        physaddr_t rsdt_phys;
+        if (!(rsdp->Revision == 0)) {
+            /* ACPI 2.0 */
+            uint8_t checksum = 0;
+            uint8_t *field;
+
+            /* COMMON HALF */
+
+            for (field = (uint8_t *)rsdp; field < (uint8_t *)&(rsdp->Length); field++)
+                checksum += *field;
+
+            if (checksum)
+                panic("RSDP broken");
+
+            /* PART ONLY FOR >=ACPI 2.0*/
+
+            for (; field < ((uint8_t *)rsdp + sizeof(*rsdp)); field++)
+                checksum += *field;
+
+            if (checksum)
+                panic("RSDP broken");
+
+            rsdt_phys = rsdp->XsdtAddress;
+            XSDT_mode = 1;
+        } else {
+            /* ACPI 1.0 */
+            uint8_t checksum = 0;
+            uint8_t *field;
+            
+            for (field = (uint8_t *)rsdp; field < (uint8_t *)&(rsdp->Length); field++)
+                checksum += *field;
+
+            if (checksum)
+                panic("RSDP broken");
+            rsdt_phys = rsdp->RsdtAddress;
+        }
+
+        rsdt = mmio_map_region(rsdt_phys, sizeof(RSDT));
+        rsdt = mmio_map_region(rsdt_phys, rsdt->h.Length);
+
+        uint8_t checksum = 0;
+        for (int i = 0; i < rsdt->h.Length; i++)
+            checksum += ((uint8_t *)&rsdt->h)[i];
+        if (checksum)
+            panic("RSDT header broken");
+    }
+
+    size_t SDT_length = (rsdt->h.Length - sizeof(ACPISDTHeader));
+
+    if (XSDT_mode) {
+        /* USING XSDT => 64 bit fileds*/
+
+        SDT_length /= 8;
+    }else{
+        /* USING RSTD => 32 bit fields*/
+
+        SDT_length /= 4;
+    }
+
+    for (size_t i = 0; i < SDT_length; i++) {
+        physaddr_t header_addr = 0;
+        if (!XSDT_mode) {
+            header_addr = rsdt->PointerToOtherSDT[i];
+        } else {
+            header_addr = ((int64_t *)(void *)rsdt->PointerToOtherSDT)[i];
+        }
+        if (!header_addr)
+            continue;
+        ACPISDTHeader *header = mmio_map_region(header_addr, sizeof(ACPISDTHeader));
+        header = mmio_map_region(header_addr, header->Length);
+
+        if (!strncmp(header->Signature, sign, 4))
+            return header;
+    }
+
 
     return NULL;
 }
@@ -94,21 +182,29 @@ acpi_find_table(const char *sign) {
 /* Obtain and map FADT ACPI table address. */
 FADT *
 get_fadt(void) {
-    // LAB 5: Your code here
+    // LAB 5_DONE: Your code here
     // (use acpi_find_table)
     // HINT: ACPI table signatures are
     //       not always as their names
 
-    return NULL;
+    static FADT *kfadt;
+    if (!kfadt)
+        kfadt = acpi_find_table("FACP");
+
+    return kfadt;
 }
 
 /* Obtain and map RSDP ACPI table address. */
 HPET *
 get_hpet(void) {
-    // LAB 5: Your code here
+    // LAB 5_DONE: Your code here
     // (use acpi_find_table)
 
-    return NULL;
+    static HPET *khpet;
+    if (!khpet)
+        khpet = acpi_find_table("HPET");
+
+    return khpet;
 }
 
 /* Getting physical HPET timer address from its table. */
@@ -208,12 +304,28 @@ hpet_get_main_cnt(void) {
  * HINT Don't forget to unmask interrupt in PIC */
 void
 hpet_enable_interrupts_tim0(void) {
-    // LAB 5: Your code here
+    // LAB 5_DONE: Your code here
+    hpetReg->GEN_CONF |= HPET_LEG_RT_CNF;
+    hpetReg->TIM0_CONF = 0;
+    hpetReg->TIM0_CONF |= (IRQ_TIMER << 9);
+    hpetReg->TIM0_CONF |= HPET_TN_TYPE_CNF;
+    hpetReg->TIM0_CONF |= HPET_TN_INT_ENB_CNF;
+    hpetReg->TIM0_CONF |= HPET_TN_VAL_SET_CNF;
+    hpetReg->TIM0_COMP = Peta / 2 / hpetFemto;
+    pic_irq_unmask(IRQ_TIMER);
 }
 
 void
 hpet_enable_interrupts_tim1(void) {
-    // LAB 5: Your code here
+    // LAB 5_DONE: Your code here
+    hpetReg->GEN_CONF |= HPET_LEG_RT_CNF;
+    hpetReg->TIM1_CONF = 0;
+    hpetReg->TIM1_CONF |= (IRQ_CLOCK << 9);
+    hpetReg->TIM1_CONF |= HPET_TN_TYPE_CNF;
+    hpetReg->TIM1_CONF |= HPET_TN_INT_ENB_CNF;
+    hpetReg->TIM1_CONF |= HPET_TN_VAL_SET_CNF;
+    hpetReg->TIM1_COMP = 3 * Peta / 2 / hpetFemto;
+    pic_irq_unmask(IRQ_CLOCK);
 }
 
 void
@@ -233,7 +345,24 @@ uint64_t
 hpet_cpu_frequency(void) {
     static uint64_t cpu_freq;
 
-    // LAB 5: Your code here
+    // LAB 5_DONE: Your code here
+    if (cpu_freq)
+        return cpu_freq;
+
+    const uint64_t wait = 100;
+
+    uint64_t hpet_delta;
+    uint64_t hpet_start = hpet_get_main_cnt();
+    uint64_t tsc_start = read_tsc();
+    uint64_t tsc_end;
+
+    do {
+        asm("pause");
+        hpet_delta = hpet_get_main_cnt() - hpet_start;
+        tsc_end = read_tsc();
+    } while (hpet_delta < hpetFreq / wait);
+
+    cpu_freq = (tsc_end - tsc_start) * hpetFreq / hpet_delta;
 
     return cpu_freq;
 }
@@ -251,7 +380,33 @@ uint64_t
 pmtimer_cpu_frequency(void) {
     static uint64_t cpu_freq;
 
-    // LAB 5: Your code here
+    // LAB 5_DONE: Your code here
+    if (cpu_freq)
+        return cpu_freq;
+
+    const uint64_t wait = 100;
+
+    uint64_t pm_delta;
+    uint64_t pm_start = pmtimer_get_timeval();
+    uint64_t tsc_start = read_tsc();
+    uint64_t tsc_end;
+
+    do {
+        asm("pause");
+        uint64_t pm_cur = pmtimer_get_timeval();
+        tsc_end = read_tsc();
+        if (pm_start <= pm_cur) {
+            /* No overflow */
+            pm_delta = pm_cur - pm_start;
+        } else if (pm_start - pm_cur <= 0x00FFFFFF) {
+            /* 24-bit overflow */
+            pm_delta = 0x00FFFFFF - pm_start + pm_cur;
+        } else {
+            pm_delta = 0xFFFFFFFF - pm_start + pm_cur;
+        }
+    } while (pm_delta < PM_FREQ / wait);
+
+    cpu_freq = (tsc_end - tsc_start) * PM_FREQ / pm_delta;
 
     return cpu_freq;
 }
