@@ -136,10 +136,11 @@ mon_frequency(int argc, char **argv, struct Trapframe *tf) {
     return 0;
 }
 
-// LAB 6: Your code here
+// LAB 6_DONE: Your code here
 /* Implement memory (mon_memory) commands. */
 int
 mon_memory(int argc, char **argv, struct Trapframe *tf) {
+    dump_memory_lists();
     return 0;
 }
 
