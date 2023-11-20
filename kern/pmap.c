@@ -467,25 +467,46 @@ dump_virtual_tree(struct Page *node, int class) {
 void
 dump_memory_lists(void) {
     // LAB 6 CHECK: Your code here
-    struct List *li = NULL;
-    struct Page *peer = NULL;
 
-    cprintf("Free pages:\nClass   Page adresses\n");
-    for (int pclass = 0; pclass < MAX_CLASS; pclass++, li = NULL) {
-        if (free_classes[pclass].next == &free_classes[pclass]) {
-            continue;
-        }
-        cprintf("%2d      ", pclass);
+    static int counter = 0;
+    static struct Page *first_page = 0;
+    counter++;
+    if (counter == 1){
+        // Just print available mem
+        
+    } else if (counter == 2){
+        // Allocate all memory
+        // ALLOC_POOL
+        first_page = alloc_page(0, ALLOC_POOL);
+        while(alloc_page(0, ALLOC_POOL));
+    } else if (counter == 3){
+        // Unref first page
+        list_del((struct List *) first_page);
+        first_page->left = first_page->right = NULL;
+        page_unref(first_page);
+    }
+
+    uint64_t total_size = 0;
+
+    struct List *idx = NULL;
+    struct Page *page = NULL;
+
+    for (int class_num = 0; class_num < MAX_CLASS; class_num++, idx = NULL) {
+        cprintf("%d\t\t", class_num);
 
         int cnt = 1;
-        for (li = free_classes[pclass].next; li != &free_classes[pclass]; li = li->next, cnt++) {
-            peer = (struct Page *)li;
-            cprintf("%08lX ", (unsigned long)peer->addr << pclass);
-            if (cnt % 8 == 0)
-                cprintf("\n        ");
+        for (idx = free_classes[class_num].next; idx != &free_classes[class_num]; idx = idx->next) {
+            page = (struct Page *)idx;
+            cprintf("%08lX ", (unsigned long)page->addr << CLASS_BASE);
+            if (cnt % 8 == 0){
+                cprintf("\n\t\t");
+            }
+            cnt++;
+            total_size += CLASS_SIZE(class_num);
         }
         cprintf("\n\n");
     }
+    cprintf("Total free size %lu \n", total_size / 1024 );
 }
 
 
