@@ -293,7 +293,7 @@ bind_functions(struct Env *env, uint8_t *binary, size_t size, uintptr_t image_st
 static int
 load_icode(struct Env *env, uint8_t *binary, size_t size) {
     // LAB 3_complete: Your code here
-    struct Elf *elf = (void *)binary;
+    struct Elf * elf = (void *)binary;
     if (elf->e_magic != ELF_MAGIC) {
         cprintf("ELF file has magic %08X instead of %08X\n", elf->e_magic, ELF_MAGIC);
         return -E_INVALID_EXE;
@@ -316,7 +316,7 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
     }
 
     switch_address_space(&env->address_space);
-    struct Proghdr *ph = (void *)(binary + elf->e_phoff);
+    struct Proghdr * ph = (void *)(binary + elf->e_phoff);
     for (; (uint8_t *)ph < binary + elf->e_phoff + elf->e_phnum * elf->e_phentsize; ph++) {
         if (ph->p_type != ELF_PROG_LOAD)
             continue;
@@ -406,8 +406,8 @@ env_destroy(struct Env *env) {
 
     // LAB 3: Your code here
     env->env_status = ENV_DYING;
+    env_free(env);
     if (env == curenv) {
-        env_free(env);
         sched_yield();
     }
 
