@@ -97,9 +97,6 @@ trapname(int trapno) {
     return "(unknown trap)";
 }
 
-extern void clock_thdlr(void);
-extern void timer_thdlr(void);
-
 void divide_thdlr(void);
 void debug_thdlr(void);
 void nmi_thdlr(void);
@@ -120,15 +117,13 @@ void mchk_thdlr(void);
 void align_thdlr(void);
 void simderr_thdlr(void);
 
+extern void clock_thdlr(void);
+extern void kbd_thdlr(void);
+extern void serial_thdlr(void);
+extern void timer_thdlr(void);
+
 void
 trap_init(void) {
-    // LAB 5_DONE: Your code here
-    idt[IRQ_OFFSET + IRQ_TIMER] = GATE(0, GD_KT, timer_thdlr, 0);
-
-    // LAB 4: Your code here
-    // LAB 5: Your code here
-
-    // LAB 8_Done: Your code here
     /* Insert trap handlers into IDT */
     idt[T_DIVIDE] = GATE(0, GD_KT, (uint64_t)divide_thdlr, 0);
     idt[T_DEBUG]  = GATE(0, GD_KT, (uint64_t)debug_thdlr, 0);
@@ -150,7 +145,6 @@ trap_init(void) {
     idt[T_SIMDERR]  = GATE(0, GD_KT, (uint64_t)simderr_thdlr, 0);
     idt[T_SYSCALL]  = GATE(0, GD_KT, (uint64_t)syscall_thdlr, 3);
 
-
     /* Setup #PF handler dedicated stack
      * It should be switched on #PF because
      * #PF is the only kind of exception that
@@ -158,10 +152,14 @@ trap_init(void) {
      * code execution */
     idt[T_PGFLT].gd_ist = 1;
 
-    // LAB 11: Your code here
+    // LAB 11_Done: Your code here
 
-    /* Per-CPU setup */
     idt[IRQ_OFFSET + IRQ_CLOCK] = GATE(0, GD_KT, clock_thdlr, 0);
+    idt[IRQ_OFFSET + IRQ_KBD] = GATE(0, GD_KT, kbd_thdlr, 0);
+    idt[IRQ_OFFSET + IRQ_SERIAL] = GATE(0, GD_KT, serial_thdlr, 0);
+    idt[IRQ_OFFSET + IRQ_TIMER] = GATE(0, GD_KT, timer_thdlr, 0);
+    
+    /* Per-CPU setup */
 
     trap_init_percpu();
 }
@@ -303,9 +301,15 @@ trap_dispatch(struct Trapframe *tf) {
         sched_yield();
         
         return;
-        // LAB 11: Your code here
-        /* Handle keyboard (IRQ_KBD + kbd_intr()) and
-         * serial (IRQ_SERIAL + serial_intr()) interrupts. */
+    // LAB 11_Done: Your code here
+    /* Handle keyboard (IRQ_KBD + kbd_intr()) and
+        * serial (IRQ_SERIAL + serial_intr()) interrupts. */
+    case IRQ_OFFSET + IRQ_KBD:
+        kbd_intr();
+        return;
+    case IRQ_OFFSET + IRQ_SERIAL:
+        serial_intr();
+        return;
     default:
         print_trapframe(tf);
         if (!(tf->tf_cs & 3))

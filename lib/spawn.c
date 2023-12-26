@@ -276,16 +276,45 @@ map_segment(envid_t child, uintptr_t va, size_t memsz,
         fileoffset -= res;
     }
 
-    // LAB 11: Your code here
+    // LAB 11_Done: Your code here
     /* NOTE: There's restriction on maximal filesz
      * for each program segment (HUGE_PAGE_SIZE) */
+    if (filesz > HUGE_PAGE_SIZE || filesz > memsz)
+        return -E_INVALID_EXE;
 
     /* Allocate filesz - memsz in child */
+    if (memsz > filesz) {
+        res = sys_alloc_region(child, (void *)va + ROUNDUP(filesz, PAGE_SIZE), ROUNDUP(memsz - filesz, PAGE_SIZE), perm);
+        if (res)
+            return res;
+    }
+
     /* Allocate filesz in parent to UTEMP */
+    if (filesz == 0)
+        return 0;
+    res = sys_alloc_region(CURENVID, UTEMP, ROUNDUP(filesz, PAGE_SIZE), PTE_U | PTE_W | PTE_P);
+    if (res)
+        return res;
+
     /* seek() fd to fileoffset  */
+    res = seek(fd, fileoffset);
+    if (res)
+        return res;
+
     /* read filesz to UTEMP */
+    res = readn(fd, UTEMP, filesz);
+    if (res < 0)
+        return res;
+
     /* Map read section conents to child */
+    res = sys_map_region(CURENVID, UTEMP, child, (void *)va, filesz, perm);
+    if (res)
+        return res;
+
     /* Unmap it from parent */
+    res = sys_unmap_region(CURENVID, UTEMP, ROUNDUP(filesz, PAGE_SIZE));
+    if (res)
+        return res;
 
     return 0;
 }
