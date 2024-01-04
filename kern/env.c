@@ -110,6 +110,9 @@ env_init(void) {
         /* Map envs to UENVS read-only,
          * but user-accessible (with PROT_USER_ set) */
         map_region(current_space, UENVS, &kspace, (uintptr_t)envs, UENVS_SIZE, PROT_R | PROT_USER_);
+        vsys = kzalloc_region(UVSYS_SIZE);
+        memset((void *)vsys, 0, ROUNDUP(UVSYS_SIZE, PAGE_SIZE));
+        map_region(current_space, UVSYS, &kspace, (uintptr_t)vsys, UVSYS_SIZE, PROT_R | PROT_USER_);
     }
     /* Set up envs array */
 
