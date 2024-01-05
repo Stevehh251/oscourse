@@ -1,4 +1,4 @@
-This branch contains kernel version with rdrand support.
+This branch contains kernel version with RDRAND support.
 BE CAREFUL: In this version was changed QEMU CPU version (Nehalem was changed to Icelake-Server-v4, since Nehalem doesnt provide necessary instructions)
 
 P.s. 
