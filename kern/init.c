@@ -167,6 +167,10 @@ i386_init(void) {
     ENV_CREATE_KERNEL_TYPE(prog_test6);
 #else
 
+#ifdef ENABLE_ASLR
+    cprintf("ASLR enabled\n");
+#endif
+
 #if LAB >= 10
     ENV_CREATE(fs_fs, ENV_TYPE_FS);
 #endif

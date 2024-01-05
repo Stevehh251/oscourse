@@ -1,13 +1,14 @@
 #include <inc/lib.h>
 #include <inc/elf.h>
 
-#define UTEMP2USTACK(addr) ((void *)(addr) + (USER_STACK_TOP - USER_STACK_SIZE) - UTEMP)
+#define UTEMP2USTACK(addr, off) ((void *)(addr) + (USER_STACK_TOP - USER_STACK_SIZE) - UTEMP - off)
 
 /* Helper functions for spawn. */
 static int init_stack(envid_t child, const char **argv, struct Trapframe *tf);
 static int map_segment(envid_t child, uintptr_t va, size_t memsz,
                        int fd, size_t filesz, off_t fileoffset, int perm);
 static int copy_shared_region(void *start, void *end, void *arg);
+static unsigned long random_region_offset(uintptr_t start, uintptr_t end, size_t len);
 
 /* Spawn a child process from a program image loaded from the file system.
  * prog: the pathname of the program to run.
@@ -104,9 +105,13 @@ spawn(const char *prog, const char **argv) {
     if ((int)(res = sys_exofork()) < 0) goto error2;
     envid_t child = res;
 
+    cprintf("Spawning new exec in env [%d]...\n", child);
+
     /* Set up trap frame, including initial stack. */
     struct Trapframe child_tf = envs[ENVX(child)].env_tf;
     child_tf.tf_rip = elf->e_entry;
+
+    cprintf("[%d] Entry at %lx\n", child, elf->e_entry);
 
     if ((res = init_stack(child, argv, &child_tf)) < 0) goto error;
 
@@ -191,6 +196,7 @@ init_stack(envid_t child, const char **argv, struct Trapframe *tf) {
     int argc, i, res;
     char *string_store;
     uintptr_t *argv_store;
+    unsigned long stack_offset = 0;
 
     /* Count the number of arguments (argc)
      * and the total amount of space needed for strings (string_size). */
@@ -231,24 +237,34 @@ init_stack(envid_t child, const char **argv, struct Trapframe *tf) {
      *
      *    * Set *init_esp to the initial stack pointer for the child,
      *      (Again, use an address valid in the child's environment.) */
+
+#ifdef ENABLE_ASLR
+    stack_offset = random_region_offset(USER_STACK_BOTTOM, USER_STACK_TOP, USER_STACK_SIZE);
+    cprintf("[%d] Stack ASLR offset  %lx\n", child, stack_offset);
+#endif
+
     for (i = 0; i < argc; i++) {
-        argv_store[i] = UTEMP2USTACK(string_store);
+        argv_store[i] = UTEMP2USTACK(string_store, stack_offset);
         strcpy(string_store, argv[i]);
         string_store += strlen(argv[i]) + 1;
     }
     argv_store[argc] = 0;
     assert(string_store == (char *)UTEMP + USER_STACK_SIZE);
 
-    argv_store[-1] = UTEMP2USTACK(argv_store);
+    argv_store[-1] = UTEMP2USTACK(argv_store, stack_offset);
     argv_store[-2] = argc;
 
-
-    tf->tf_rsp = UTEMP2USTACK(&argv_store[-2]);
+    tf->tf_rsp = UTEMP2USTACK(&argv_store[-2], stack_offset);
 
     /* After completing the stack, map it into the child's address space
      * and unmap it from ours! */
-    if (sys_map_region(0, UTEMP, child, (void *)(USER_STACK_TOP - USER_STACK_SIZE),
+    if (sys_map_region(0, UTEMP, child, (void *)(USER_STACK_TOP - USER_STACK_SIZE - stack_offset),
                        USER_STACK_SIZE, PROT_RW) < 0) goto error;
+
+    cprintf("[%d] Stack successfully initiated at [%llx, %llx]\n", 
+        child, USER_STACK_TOP - stack_offset - USER_STACK_SIZE, USER_STACK_TOP - stack_offset);
+    cprintf("[%d] Stack pointer placed at %lx\n", child, tf->tf_rsp);
+
 error:
     if (sys_unmap_region(0, UTEMP, USER_STACK_SIZE) < 0) goto error;
     return res;
@@ -257,6 +273,7 @@ error:
 static int
 copy_shared_region(void *start, void *end, void *arg) {
     envid_t child = *(envid_t *)arg;
+    cprintf("[%d] Shared region at [%lx, %lx]\n", child, (uintptr_t)start, (uintptr_t)end);
     return sys_map_region(0, start, child, start, end - start, get_prot(start));
 }
 
@@ -264,8 +281,6 @@ copy_shared_region(void *start, void *end, void *arg) {
 static int
 map_segment(envid_t child, uintptr_t va, size_t memsz,
             int fd, size_t filesz, off_t fileoffset, int perm) {
-
-    // cprintf("map_segment %x+%x\n", va, memsz);
 
     /* Fixup unaligned destination */
     int res = PAGE_OFFSET(va);
@@ -316,5 +331,18 @@ map_segment(envid_t child, uintptr_t va, size_t memsz,
     if (res)
         return res;
 
+    cprintf("[%d] Mapped segment at [%lx, %lx]\n", child, va, va + memsz);
+
     return 0;
+}
+
+
+static unsigned long 
+random_region_offset(uintptr_t start, uintptr_t end, size_t len) {
+    size_t range = end - len - start;
+
+    if (end <= start + len)
+        return 0;
+
+    return ROUNDDOWN((unsigned long)sys_rdrand() % range, PAGE_SIZE);
 }

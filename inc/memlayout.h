@@ -165,6 +165,8 @@
 #define USER_STACK_TOP (USER_EXCEPTION_STACK_TOP - USER_EXCEPTION_STACK_SIZE - PAGE_SIZE)
 /* Stack size (variable) */
 #define USER_STACK_SIZE (16 * PAGE_SIZE)
+/* Lowest possible adress of user stack mapping */
+#define USER_STACK_BOTTOM 0x7000000000
 /* Max number of open files in the file system at once */
 #define MAXOPEN   512
 #define FILE_BASE 0x200000000

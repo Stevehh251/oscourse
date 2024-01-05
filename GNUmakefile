@@ -154,6 +154,10 @@ CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 &
 CFLAGS += $(EXTRA_CFLAGS)
 CFLAGS += -mno-sse -mno-sse2 -mno-mmx
 
+ifeq ($(ENABLE_ASLR),y)
+CFLAGS += -DENABLE_ASLR 
+#ULDFLAGS += -pie
+endif
 
 KERN_SAN_CFLAGS :=
 KERN_SAN_LDFLAGS :=
