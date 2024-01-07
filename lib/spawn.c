@@ -5,10 +5,11 @@
 
 /* Helper functions for spawn. */
 static int init_stack(envid_t child, const char **argv, struct Trapframe *tf);
-static int map_segment(envid_t child, uintptr_t va, size_t memsz,
-                       int fd, size_t filesz, off_t fileoffset, int perm);
+static int map_segment(envid_t child, struct Elf *elf, uintptr_t va, unsigned long load_offset, size_t memsz,
+            int fd, size_t filesz, off_t fileoffset, int perm);
 static int copy_shared_region(void *start, void *end, void *arg);
 static unsigned long random_region_offset(uintptr_t start, uintptr_t end, size_t len);
+static int fix_reloc(envid_t child, struct Elf *elf, unsigned long load_offset, uintptr_t va, size_t filesz, int fd, void *store);
 
 /* Spawn a child process from a program image loaded from the file system.
  * prog: the pathname of the program to run.
@@ -19,6 +20,7 @@ int
 spawn(const char *prog, const char **argv) {
     unsigned char elf_buf[512];
     int res;
+    unsigned long load_offset = 0;
 
     /* This code follows this procedure:
      *
@@ -94,7 +96,7 @@ spawn(const char *prog, const char **argv) {
         elf->e_elf[0] != 2 /* 64-bit */ ||
         elf->e_elf[1] != 1 /* little endian */ ||
         elf->e_elf[2] != 1 /* version 1 */ ||
-        elf->e_type != ET_EXEC /* executable */ ||
+        (elf->e_type != ET_EXEC && elf->e_type != ET_DYN) || /* executable or PIE */ 
         elf->e_machine != 0x3E /* amd64 */) {
         cprintf("Elf magic %08x want %08x\n", elf->e_magic, ELF_MAGIC);
         close(fd);
@@ -105,18 +107,35 @@ spawn(const char *prog, const char **argv) {
     if ((int)(res = sys_exofork()) < 0) goto error2;
     envid_t child = res;
 
-    cprintf("Spawning new exec in env [%d]...\n", child);
+    trace("Spawning new exec in env [%d]...\n", child);
 
-    /* Set up trap frame, including initial stack. */
-    struct Trapframe child_tf = envs[ENVX(child)].env_tf;
-    child_tf.tf_rip = elf->e_entry;
+    trace("[%d] Type of ELF %d\n", child, elf->e_type);
 
-    cprintf("[%d] Entry at %lx\n", child, elf->e_entry);
+    struct Proghdr *ph;
 
-    if ((res = init_stack(child, argv, &child_tf)) < 0) goto error;
+#if ENABLE_ASLR
+    /* Use ASLR on entry point if PIE */
+    if (elf->e_type == ET_DYN) {
+        /* Calculate address range of program segments */
+        uintptr_t low_addr = UTEXT_MAX;
+        uintptr_t high_addr = UTEXT;
+        ph = (struct Proghdr *)(elf_buf + elf->e_phoff);
+        for (size_t i = 0; i < elf->e_phnum; i++, ph++) {
+            if (ph->p_type != ELF_PROG_LOAD) continue;
+            low_addr = MIN(low_addr, ph->p_va);
+            high_addr = MAX(high_addr, ph->p_va + ph->p_memsz);
+        }
+        low_addr = ROUNDDOWN(low_addr, PAGE_SIZE);
+        high_addr = ROUNDUP(high_addr, PAGE_SIZE);
+
+        /* Get random offset to load image at */
+        load_offset = random_region_offset(UTEXT, UTEXT_MAX, high_addr - low_addr);
+        trace("[%d] Image ASLR offset %lx\n", child, load_offset);
+    }
+#endif
 
     /* Set up program segments as defined in ELF header. */
-    struct Proghdr *ph = (struct Proghdr *)(elf_buf + elf->e_phoff);
+    ph = (struct Proghdr *)(elf_buf + elf->e_phoff);
     for (size_t i = 0; i < elf->e_phnum; i++, ph++) {
         if (ph->p_type != ELF_PROG_LOAD) continue;
         int perm = 0;
@@ -125,10 +144,22 @@ spawn(const char *prog, const char **argv) {
         if (ph->p_flags & ELF_PROG_FLAG_READ) perm |= PROT_R;
         if (ph->p_flags & ELF_PROG_FLAG_EXEC) perm |= PROT_X;
 
-        if ((res = map_segment(child, ph->p_va, ph->p_memsz,
+        trace("[%d] Mapping segment sized [%lx, %lx] into [%lx, %lx] with perm %d\n", 
+            child, ph->p_va + load_offset, ph->p_va + load_offset + ph->p_memsz, 
+            ROUNDDOWN(ph->p_va + load_offset, PAGE_SIZE), ROUNDUP(ph->p_va + load_offset + ph->p_memsz, PAGE_SIZE), perm);
+
+        if ((res = map_segment(child, elf, ph->p_va, load_offset, ph->p_memsz,
                                fd, ph->p_filesz, ph->p_offset, perm)) < 0)
             goto error;
     }
+
+    /* Set up trap frame, including initial stack. */
+    struct Trapframe child_tf = envs[ENVX(child)].env_tf;
+    child_tf.tf_rip = elf->e_entry + load_offset;
+
+    trace("[%d] Entry at %lx\n", child, child_tf.tf_rip);
+
+    if ((res = init_stack(child, argv, &child_tf)) < 0) goto error;
 
     close(fd);
 
@@ -145,6 +176,7 @@ spawn(const char *prog, const char **argv) {
     return child;
 
 error:
+    trace("[%d] Something went wrong with code %d\n", child, res);
     sys_env_destroy(child);
 error2:
     close(fd);
@@ -240,7 +272,7 @@ init_stack(envid_t child, const char **argv, struct Trapframe *tf) {
 
 #ifdef ENABLE_ASLR
     stack_offset = random_region_offset(USER_STACK_BOTTOM, USER_STACK_TOP, USER_STACK_SIZE);
-    cprintf("[%d] Stack ASLR offset  %lx\n", child, stack_offset);
+    trace("[%d] Stack ASLR offset  %lx\n", child, stack_offset);
 #endif
 
     for (i = 0; i < argc; i++) {
@@ -261,9 +293,9 @@ init_stack(envid_t child, const char **argv, struct Trapframe *tf) {
     if (sys_map_region(0, UTEMP, child, (void *)(USER_STACK_TOP - USER_STACK_SIZE - stack_offset),
                        USER_STACK_SIZE, PROT_RW) < 0) goto error;
 
-    cprintf("[%d] Stack successfully initiated at [%llx, %llx]\n", 
+    trace("[%d] Stack successfully initiated at [%llx, %llx]\n", 
         child, USER_STACK_TOP - stack_offset - USER_STACK_SIZE, USER_STACK_TOP - stack_offset);
-    cprintf("[%d] Stack pointer placed at %lx\n", child, tf->tf_rsp);
+    trace("[%d] Stack pointer placed at %lx\n", child, tf->tf_rsp);
 
 error:
     if (sys_unmap_region(0, UTEMP, USER_STACK_SIZE) < 0) goto error;
@@ -273,15 +305,16 @@ error:
 static int
 copy_shared_region(void *start, void *end, void *arg) {
     envid_t child = *(envid_t *)arg;
-    cprintf("[%d] Shared region at [%lx, %lx]\n", child, (uintptr_t)start, (uintptr_t)end);
+    trace("[%d] Shared region at [%lx, %lx]\n", child, (uintptr_t)start, (uintptr_t)end);
     return sys_map_region(0, start, child, start, end - start, get_prot(start));
 }
 
 
 static int
-map_segment(envid_t child, uintptr_t va, size_t memsz,
+map_segment(envid_t child, struct Elf *elf, uintptr_t va, unsigned long load_offset, size_t memsz,
             int fd, size_t filesz, off_t fileoffset, int perm) {
 
+    va += load_offset;
     /* Fixup unaligned destination */
     int res = PAGE_OFFSET(va);
     if (res) {
@@ -321,8 +354,15 @@ map_segment(envid_t child, uintptr_t va, size_t memsz,
     if (res < 0)
         return res;
 
+    /* Fix dynamic relocations if PIE */
+    if (elf->e_type == ET_DYN) {
+        res = fix_reloc(child, elf, load_offset, va, filesz, fd, UTEMP + ROUNDUP(filesz, PAGE_SIZE));
+        if (res)
+            return res;
+    }
+
     /* Map read section conents to child */
-    res = sys_map_region(CURENVID, UTEMP, child, (void *)va, filesz, perm);
+    res = sys_map_region(CURENVID, UTEMP, child, (void *)va, ROUNDUP(filesz, PAGE_SIZE), perm);
     if (res)
         return res;
 
@@ -331,13 +371,11 @@ map_segment(envid_t child, uintptr_t va, size_t memsz,
     if (res)
         return res;
 
-    cprintf("[%d] Mapped segment at [%lx, %lx]\n", child, va, va + memsz);
-
     return 0;
 }
 
 
-static unsigned long 
+static unsigned long
 random_region_offset(uintptr_t start, uintptr_t end, size_t len) {
     size_t range = end - len - start;
 
@@ -345,4 +383,77 @@ random_region_offset(uintptr_t start, uintptr_t end, size_t len) {
         return 0;
 
     return ROUNDDOWN((unsigned long)sys_rdrand() % range, PAGE_SIZE);
+}
+
+static int
+fix_reloc(envid_t child, struct Elf *elf, unsigned long load_offset, uintptr_t va, size_t filesz, int fd, void *store) {
+    int res = 0;
+    if (trace_reloc) trace("[%d] Going through section headers, counting %u\n", child, elf->e_shnum); 
+
+    /* Alloc memory for section headers */
+    size_t secthdr_size = elf->e_shnum * sizeof(struct Secthdr);
+    res = sys_alloc_region(CURENVID, store, ROUNDUP(secthdr_size, PAGE_SIZE), PTE_U | PTE_W | PTE_P);
+
+    /* seek secthdr and read it */
+    res = seek(fd, elf->e_shoff);
+    res = readn(fd, store, secthdr_size);
+
+    /* Go through relocation sections */
+    struct Secthdr *sh = (struct Secthdr *) store;
+    void *rela = ROUNDUP((void *) store + secthdr_size, PAGE_SIZE);
+    for (size_t i = 0; i < elf->e_shnum; i++, sh++) {
+        if (sh->sh_type == ELF_SHT_RELA || sh->sh_type == ELF_SHT_REL) {
+            if (trace_reloc) trace("[%d] Rela section found at pos %lu\n", child, i);
+
+            /* Alloc memory for reloc sector */
+            res = sys_alloc_region(CURENVID, rela, ROUNDUP(sh->sh_size, PAGE_SIZE), PTE_U | PTE_W | PTE_P);
+
+            /* Seek and read*/
+            res = seek(fd, sh->sh_offset);
+            res = readn(fd, rela, sh->sh_size);
+
+            // /* Get lower and higher offsets to be relocated */
+            // uintptr_t lower_off = -1, higher_off = 0; 
+            // if (sh->sh_type == ELF_SHT_RELA) {
+            //     size_t reloc_cnt = sh->sh_size / sizeof(struct Elf64_Rela);
+            //     struct Elf64_Rela *entry = (struct Elf64_Rela *) rela;
+            //     for (size_t i = 0; i < reloc_cnt; i++, entry++) {
+            //         lower_off = MIN(lower_off, entry->r_offset);
+            //         higher_off = MAX(higher_off, entry->r_offset);
+            //     }
+            // }
+            // if (sh->sh_type == ELF_SHT_REL) {
+            //     /*TODO*/
+            // }
+            // lower_off = ROUNDDOWN(lower_off, PAGE_SIZE);
+            // higher_off = ROUNDUP(higher_off, PAGE_SIZE);
+            // cprintf("[%d] Calculated lower and higher offsets %lx, %lx\n", child, lower_off, higher_off);
+
+            /* Apply relocations */
+            if (sh->sh_type == ELF_SHT_RELA) {
+                size_t reloc_cnt = sh->sh_size / sizeof(struct Elf64_Rela);
+                if (trace_reloc) trace("[%d] Relocations cnt %lu\n", child, reloc_cnt);
+                struct Elf64_Rela *entry = (struct Elf64_Rela *) rela;
+                for (size_t i = 0; i < reloc_cnt; i++, entry++) {
+                    if (entry->r_offset + load_offset < va || entry->r_offset + load_offset >= va + filesz) {
+                        continue;
+                    }
+                    int64_t *reloc_addr = (int64_t *) (entry->r_offset + load_offset - va + UTEMP);
+                    if (trace_reloc) trace("[%d] Reloc address %lx, its content %lx, addent value %lx\n", child, entry->r_offset, *reloc_addr, entry->r_addend);
+                    *reloc_addr = entry->r_addend + load_offset;
+                }
+            }
+            if (sh->sh_type == ELF_SHT_REL) {
+                /*TODO*/
+            }
+
+            /* Unmap reloc sector*/
+            res = sys_unmap_region(CURENVID, rela, ROUNDUP(sh->sh_size, PAGE_SIZE));
+        }
+    
+    }
+    /* Unmap memory */
+    res = sys_unmap_region(CURENVID, store, ROUNDUP(secthdr_size, PAGE_SIZE));
+    
+    return res;
 }

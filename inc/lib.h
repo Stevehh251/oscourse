@@ -182,4 +182,14 @@ extern void (*volatile sys_yield)(void);
 #define debug 0
 #endif
 
+#ifndef debug_aslr
+#define debug_aslr 0
+#endif
+
+#ifndef trace_reloc
+#define trace_reloc 0
+#endif
+
+#define trace if (debug_aslr) cprintf
+
 #endif /* !JOS_INC_LIB_H */

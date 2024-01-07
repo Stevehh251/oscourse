@@ -301,6 +301,36 @@ bind_functions(struct Env *env, uint8_t *binary, size_t size, uintptr_t image_st
  *   You must also do something with the program's entry point,
  *   to make sure that the environment starts executing there.
  *   What?  (See env_run() and env_pop_tf() below.) */
+
+static int
+map_segment(struct AddressSpace *dst, uintptr_t va, size_t memsz, size_t filesz, uint8_t *binary, size_t offset, int perm) {
+    int res = PAGE_OFFSET(va);
+    if (res) {
+        va -= res;
+        memsz += res;
+        offset -= res;
+        filesz += res;
+    }
+    trace("Mapping into [%lx, %lx]\n", va, va + ROUNDUP(memsz, PAGE_SIZE));
+    if (map_region(dst, va, NULL, 0, ROUNDUP(memsz, PAGE_SIZE), PROT_RWX | PROT_USER_ | ALLOC_ZERO)) {
+        trace("Failed to map segment\n");
+        return -E_UNSPECIFIED;
+    }
+    memcpy((void *) va, binary + offset, filesz);
+    if (map_region(dst, va, dst, va, ROUNDUP(memsz, PAGE_SIZE), (perm & 7) | PROT_USER_)) {
+        trace("Failed to map segment\n");
+        return -E_UNSPECIFIED;
+    }
+    // trace("Mapping into [%lx, %lx]\n", va, va + ROUNDUP(memsz, PAGE_SIZE));
+    // map_region(dst, va, NULL, 0, ROUNDUP(memsz, PAGE_SIZE), PROT_RWX | PROT_USER_ | ALLOC_ZERO);
+
+    // memcpy((void *)va, binary + offset, filesz);
+
+    // map_region(dst, va, dst, va, ROUNDUP(memsz, PAGE_SIZE), (perm & 7) | PROT_USER_);
+
+    return 0;
+}
+
 static int
 load_icode(struct Env *env, uint8_t *binary, size_t size) {
     // LAB 3_complete: Your code here
@@ -309,8 +339,8 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
         cprintf("ELF file has magic %08X instead of %08X\n", elf->e_magic, ELF_MAGIC);
         return -E_INVALID_EXE;
     }
-    if (elf->e_type != ET_EXEC) {
-        cprintf("ELF file is not executable\n");
+    if (elf->e_type != ET_EXEC && elf->e_type != ET_DYN) {
+        cprintf("ELF file is not executable, type %d\n", elf->e_type);
         return -E_INVALID_EXE;
     }
     if (elf->e_shentsize != sizeof(struct Secthdr)) {
@@ -326,11 +356,19 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
         return -E_INVALID_EXE;
     }
 
+    trace("Loading from kernel new exec in env [%lx]...\n", (uintptr_t) env);
+
+    unsigned long load_offset = 0;
+    if (elf->e_type == ET_DYN) {
+        //load_offset = UTEXT;
+    }
+
+    trace("[%lx] Type of ELF %d, entry %lx, offset %lx\n", (uintptr_t) env, elf->e_type, elf->e_entry, load_offset);
+
     switch_address_space(&env->address_space);
-    struct Proghdr * ph = (void *)(binary + elf->e_phoff);
-    for (; (uint8_t *)ph < binary + elf->e_phoff + elf->e_phnum * elf->e_phentsize; ph++) {
-        if (ph->p_type != ELF_PROG_LOAD)
-            continue;
+    struct Proghdr *ph = (void *)(binary + elf->e_phoff);
+    for (size_t i = 0; i < elf->e_phnum; i++, ph++) {
+        if (ph->p_type != ELF_PROG_LOAD) continue;
         if (ph->p_filesz > ph->p_memsz) {
             cprintf("ELF file segment is %lu bytes long while it should fit in %lu bytes in memory\n",
                     ph->p_filesz, ph->p_memsz);
@@ -338,19 +376,31 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
             return -E_INVALID_EXE;
         }
 
-        map_region(current_space, (uintptr_t)ph->p_va, NULL, 0, ROUNDUP(ph->p_memsz, PAGE_SIZE), PROT_RWX | PROT_USER_ | ALLOC_ZERO);
+        // int perm = PROT_USER_;
+        // if (ph->p_flags & ELF_PROG_FLAG_WRITE) perm |= PROT_W;
+        // if (ph->p_flags & ELF_PROG_FLAG_READ) perm |= PROT_R;
+        // if (ph->p_flags & ELF_PROG_FLAG_EXEC) perm |= PROT_X;
 
-        memcpy((void *)ph->p_va, binary + ph->p_offset, ph->p_filesz);
+        uintptr_t va = ph->p_va + load_offset;
+        trace("[%lx] Mapping segment [%lx, %lx] with perm %u\n", (uintptr_t) env, va, va + ph->p_memsz, ph->p_flags);
+        if (map_segment(current_space, va, ph->p_memsz, ph->p_filesz, binary, ph->p_offset, ph->p_flags)) {
+            trace("[%lx] Failed to map a segment!!!\n", (uintptr_t) env);
+            return -E_UNSPECIFIED;
+        }
 
-        map_region(current_space, (uintptr_t)ph->p_va, current_space, (uintptr_t)ph->p_va,
-                   ROUNDUP(ph->p_memsz, PAGE_SIZE), (ph->p_flags & 7) | PROT_USER_);
+        
 #ifdef CONFIG_KSPACE
-        if (bind_functions(env, binary, size, ph->p_va, ph->p_va + ph->p_memsz))
+        if (bind_functions(env, binary, size, ph->p_va + load_offset, ph->p_va + load_offset + ph->p_memsz))
             panic("load_icode failed binding functions\n");
 #endif
     }
+
     map_region(current_space, USER_STACK_TOP - USER_STACK_SIZE, NULL, 0, USER_STACK_SIZE, PROT_R | PROT_W | PROT_USER_ | ALLOC_ZERO);
-    env->env_tf.tf_rip = elf->e_entry;
+    trace("[%lx] Mapped stack at [%llx, %llx]\n", (uintptr_t) env, USER_STACK_TOP - USER_STACK_SIZE, USER_STACK_TOP);
+    trace("[%lx] Stack pointer at %lx\n", (uintptr_t) env, env->env_tf.tf_rsp);
+    
+    env->env_tf.tf_rip = elf->e_entry + load_offset;
+    trace("[%lx] Entry point at %lx\n", (uintptr_t) env, env->env_tf.tf_rip);
 
     // Lan 8_Done
     switch_address_space(&kspace);

@@ -1,6 +1,16 @@
 #ifndef JOS_INC_TRACEOPT_H
 #define JOS_INC_TRACEOPT_H
 
+#ifndef debug_aslr
+#define debug_aslr 0
+#endif
+
+#ifndef trace_reloc
+#define trace_reloc 0
+#endif
+
+#define trace if (debug_aslr) cprintf
+
 #if LAB == 8
 #define trace_traps 1
 #elif !defined(trace_traps)
