@@ -13,13 +13,28 @@ const char *binaryname = "<unknown>";
 void (*volatile sys_exit)(void);
 #endif
 
-extern unsigned __stack_chk_guard;
+uintptr_t __stack_chk_guard = 0;
+
+__attribute__((weak)) 
+uintptr_t __stack_chk_guard_init(void)
+{
+    return 0x123456;
+}
+
+static void __attribute__((constructor)) 
+__construct_stk_chk_guard()
+{
+    if(__stack_chk_guard == 0)
+    {
+        __stack_chk_guard = __stack_chk_guard_init();
+    }
+}
 
 __attribute__((no_stack_protector, noreturn))
 void __stack_chk_fail(void)
 {
     // panic("Canary check failed: expected %x", *(uint32_t*)UCANARY_VAL);
-    panic("Canary check failed: expected %x", __stack_chk_guard);
+    panic("Canary check failed: expected %lx", __stack_chk_guard);
 }
 
 void __attribute__ ((no_stack_protector, noreturn))
