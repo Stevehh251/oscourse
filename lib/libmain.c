@@ -13,6 +13,21 @@ const char *binaryname = "<unknown>";
 void (*volatile sys_exit)(void);
 #endif
 
+extern unsigned __stack_chk_guard;
+
+__attribute__((no_stack_protector, noreturn))
+void __stack_chk_fail(void)
+{
+    // panic("Canary check failed: expected %x", *(uint32_t*)UCANARY_VAL);
+    panic("Canary check failed: expected %x", __stack_chk_guard);
+}
+
+void __attribute__ ((no_stack_protector, noreturn))
+__stack_chk_fail_local (void)
+{
+    __stack_chk_fail();
+}
+
 void
 libmain(int argc, char **argv) {
     /* Perform global constructor initialisation (e.g. asan)

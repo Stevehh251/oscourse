@@ -48,3 +48,9 @@ args_exist:
     xorl %ebp, %ebp
     call libmain
     jmp .
+
+
+# Global variable provide stack canary
+.globl __stack_chk_guard
+__stack_chk_guard:
+.long 0x10    

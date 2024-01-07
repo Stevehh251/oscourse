@@ -293,6 +293,10 @@ else
 USER_CFLAGS += -DJOS_USER
 endif
 
+ifeq ($(ENABLE_STACK_PROTECTOR),y)
+USER_CFLAGS += -fstack-protector 
+endif
+
 # Update .vars.X if variable X has changed since the last make run.
 #
 # Rules that use variable X should depend on $(OBJDIR)/.vars.X.  If
