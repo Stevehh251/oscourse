@@ -14,6 +14,13 @@
 #include <kern/trap.h>
 #include <kern/traceopt.h>
 
+#include <kern/rdrand.h>
+
+static unsigned 
+sys_rdrand(void){
+    return rdrand();
+}
+
 /* Print a string to the system console.
  * The string is exactly 'len' characters long.
  * Destroys the environment on memory errors. */
@@ -500,6 +507,8 @@ syscall(uintptr_t syscallno, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t
         return sys_env_set_trapframe((envid_t)a1, (struct Trapframe *)a2);
     case SYS_gettime:
         return sys_gettime();
+    case SYS_rdrand:
+        return sys_rdrand();
     default:
         return -E_NO_SYS;
     }
