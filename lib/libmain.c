@@ -3,6 +3,7 @@
 
 #include <inc/lib.h>
 #include <inc/x86.h>
+#include <kern/rdrand.h>
 
 extern void umain(int argc, char **argv);
 
@@ -13,15 +14,20 @@ const char *binaryname = "<unknown>";
 void (*volatile sys_exit)(void);
 #endif
 
-uintptr_t __stack_chk_guard = 0;
+uintptr_t __stack_chk_guard;
 
-__attribute__((weak)) 
+__attribute__((no_stack_protector)) 
 uintptr_t __stack_chk_guard_init(void)
-{
-    return 0x123456;
+{   
+    if (UINTPTR_MAX == UINT32_MAX){
+        return (uintptr_t)sys_rdrand();
+    }else{
+        return ((uintptr_t)sys_rdrand() << 32) + (uintptr_t)sys_rdrand();
+    }
 }
 
-static void __attribute__((constructor)) 
+
+void __attribute__((no_stack_protector, constructor)) 
 __construct_stk_chk_guard()
 {
     if(__stack_chk_guard == 0)
@@ -33,7 +39,6 @@ __construct_stk_chk_guard()
 __attribute__((no_stack_protector, noreturn))
 void __stack_chk_fail(void)
 {
-    // panic("Canary check failed: expected %x", *(uint32_t*)UCANARY_VAL);
     panic("Canary check failed: expected %lx", __stack_chk_guard);
 }
 

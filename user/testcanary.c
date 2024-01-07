@@ -3,7 +3,7 @@
 
 #define BUFSIZE 10
 
-extern unsigned __stack_chk_guard;
+extern uintptr_t __stack_chk_guard;
 
 void
 umain(int argc, char **argv)
