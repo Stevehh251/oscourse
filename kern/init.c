@@ -18,6 +18,7 @@
 #include <kern/kclock.h>
 #include <kern/kdebug.h>
 #include <kern/traceopt.h>
+#include <kern/rdrand.h>
 
 void
 timers_init(void) {
@@ -168,6 +169,9 @@ i386_init(void) {
 #else
 
 #ifdef ENABLE_ASLR
+    if (!check_rdrand_available()) {
+        panic("RDrand is not available\n");
+    }
     cprintf("ASLR enabled\n");
 #endif
 

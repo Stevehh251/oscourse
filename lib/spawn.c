@@ -5,11 +5,11 @@
 
 /* Helper functions for spawn. */
 static int init_stack(envid_t child, const char **argv, struct Trapframe *tf);
-static int map_segment(envid_t child, struct Elf *elf, uintptr_t va, unsigned long load_offset, size_t memsz,
+static int map_segment(envid_t child, struct Elf *elf, uintptr_t va, long load_offset, size_t memsz,
             int fd, size_t filesz, off_t fileoffset, int perm);
 static int copy_shared_region(void *start, void *end, void *arg);
-static unsigned long random_region_offset(uintptr_t start, uintptr_t end, size_t len);
-static int fix_reloc(envid_t child, struct Elf *elf, unsigned long load_offset, uintptr_t va, size_t filesz, int fd, void *store);
+static unsigned long random_region_base(uintptr_t start, uintptr_t end, size_t len);
+static int fix_reloc(envid_t child, struct Elf *elf, long load_offset, uintptr_t va, size_t filesz, int fd, void *store);
 
 /* Spawn a child process from a program image loaded from the file system.
  * prog: the pathname of the program to run.
@@ -20,7 +20,6 @@ int
 spawn(const char *prog, const char **argv) {
     unsigned char elf_buf[512];
     int res;
-    unsigned long load_offset = 0;
 
     /* This code follows this procedure:
      *
@@ -107,12 +106,14 @@ spawn(const char *prog, const char **argv) {
     if ((int)(res = sys_exofork()) < 0) goto error2;
     envid_t child = res;
 
-    trace("Spawning new exec in env [%d]...\n", child);
+    trace("\nSpawning new exec in env [%d]...\n", child);
 
-    trace("[%d] Type of ELF %d\n", child, elf->e_type);
+    trace("[%d] Type of ELF %s\n", child, elf->e_type == ET_EXEC ? "no-pie" : "pie");
 
     struct Proghdr *ph;
 
+    uintptr_t load_base = elf->e_entry;
+    long load_offset = 0;
 #if ENABLE_ASLR
     /* Use ASLR on entry point if PIE */
     if (elf->e_type == ET_DYN) {
@@ -129,8 +130,9 @@ spawn(const char *prog, const char **argv) {
         high_addr = ROUNDUP(high_addr, PAGE_SIZE);
 
         /* Get random offset to load image at */
-        load_offset = random_region_offset(UTEXT, UTEXT_MAX, high_addr - low_addr);
-        trace("[%d] Image ASLR offset %lx\n", child, load_offset);
+        load_base = random_region_base(UTEXT, UTEXT_MAX, high_addr - low_addr);
+        load_offset = load_base - elf->e_entry;
+        trace("[%d] Image ASLR load base %lx\n", child, load_base);
     }
 #endif
 
@@ -228,7 +230,6 @@ init_stack(envid_t child, const char **argv, struct Trapframe *tf) {
     int argc, i, res;
     char *string_store;
     uintptr_t *argv_store;
-    unsigned long stack_offset = 0;
 
     /* Count the number of arguments (argc)
      * and the total amount of space needed for strings (string_size). */
@@ -270,8 +271,13 @@ init_stack(envid_t child, const char **argv, struct Trapframe *tf) {
      *    * Set *init_esp to the initial stack pointer for the child,
      *      (Again, use an address valid in the child's environment.) */
 
+    uintptr_t stack_base = USER_STACK_TOP - USER_STACK_SIZE;
+    uintptr_t stack_top = USER_STACK_TOP;
+    long stack_offset = 0;
 #ifdef ENABLE_ASLR
-    stack_offset = random_region_offset(USER_STACK_BOTTOM, USER_STACK_TOP, USER_STACK_SIZE);
+    stack_base = random_region_base(USER_STACK_BOTTOM, USER_STACK_TOP, USER_STACK_SIZE);
+    stack_top = stack_base + USER_STACK_SIZE;
+    stack_offset = (long) USER_STACK_TOP - stack_top;
     trace("[%d] Stack ASLR offset  %lx\n", child, stack_offset);
 #endif
 
@@ -290,11 +296,9 @@ init_stack(envid_t child, const char **argv, struct Trapframe *tf) {
 
     /* After completing the stack, map it into the child's address space
      * and unmap it from ours! */
-    if (sys_map_region(0, UTEMP, child, (void *)(USER_STACK_TOP - USER_STACK_SIZE - stack_offset),
-                       USER_STACK_SIZE, PROT_RW) < 0) goto error;
+    if (sys_map_region(0, UTEMP, child, (void *)stack_base, USER_STACK_SIZE, PROT_RW) < 0) goto error;
 
-    trace("[%d] Stack successfully initiated at [%llx, %llx]\n", 
-        child, USER_STACK_TOP - stack_offset - USER_STACK_SIZE, USER_STACK_TOP - stack_offset);
+    trace("[%d] Stack successfully initiated at [%lx, %lx]\n", child, stack_base, stack_top);
     trace("[%d] Stack pointer placed at %lx\n", child, tf->tf_rsp);
 
 error:
@@ -311,7 +315,7 @@ copy_shared_region(void *start, void *end, void *arg) {
 
 
 static int
-map_segment(envid_t child, struct Elf *elf, uintptr_t va, unsigned long load_offset, size_t memsz,
+map_segment(envid_t child, struct Elf *elf, uintptr_t va, long load_offset, size_t memsz,
             int fd, size_t filesz, off_t fileoffset, int perm) {
 
     va += load_offset;
@@ -376,17 +380,15 @@ map_segment(envid_t child, struct Elf *elf, uintptr_t va, unsigned long load_off
 
 
 static unsigned long
-random_region_offset(uintptr_t start, uintptr_t end, size_t len) {
+random_region_base(uintptr_t start, uintptr_t end, size_t len) {
     size_t range = end - len - start;
-
     if (end <= start + len)
         return 0;
-
-    return ROUNDDOWN((unsigned long)sys_rdrand() % range, PAGE_SIZE);
+    return ROUNDDOWN((unsigned long)sys_rdrand() % range + start, PAGE_SIZE);
 }
 
 static int
-fix_reloc(envid_t child, struct Elf *elf, unsigned long load_offset, uintptr_t va, size_t filesz, int fd, void *store) {
+fix_reloc(envid_t child, struct Elf *elf, long load_offset, uintptr_t va, size_t filesz, int fd, void *store) {
     int res = 0;
     if (trace_reloc) trace("[%d] Going through section headers, counting %u\n", child, elf->e_shnum); 
 

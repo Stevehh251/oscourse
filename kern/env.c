@@ -19,6 +19,7 @@
 #include <kern/traceopt.h>
 #include <kern/trap.h>
 #include <kern/vsyscall.h>
+#include <kern/rdrand.h>
 
 /* Currently active environment */
 struct Env *curenv = NULL;
@@ -302,8 +303,49 @@ bind_functions(struct Env *env, uint8_t *binary, size_t size, uintptr_t image_st
  *   to make sure that the environment starts executing there.
  *   What?  (See env_run() and env_pop_tf() below.) */
 
+static unsigned long
+random_region_base(uintptr_t start, uintptr_t end, size_t len) {
+    size_t range = end - len - start;
+    if (end <= start + len)
+        return 0;
+    return ROUNDDOWN((unsigned long)(rdrand()) % range + start, PAGE_SIZE);
+}
+
 static int
-map_segment(struct AddressSpace *dst, uintptr_t va, size_t memsz, size_t filesz, uint8_t *binary, size_t offset, int perm) {
+fix_reloc(struct Elf *elf, long load_offset, uintptr_t va, size_t filesz) {
+    if (trace_reloc) trace("Going through section headers, counting %u\n", elf->e_shnum); 
+
+    /* Go through relocation sections */
+    struct Secthdr *sh = (struct Secthdr *) ((void *)elf + elf->e_shoff);
+    for (size_t i = 0; i < elf->e_shnum; i++, sh++) {
+        if (sh->sh_type == ELF_SHT_RELA || sh->sh_type == ELF_SHT_REL) {
+            if (trace_reloc) trace("Rela section found at pos %lu\n", i);
+
+            /* Apply relocations */
+            if (sh->sh_type == ELF_SHT_RELA) {
+                size_t reloc_cnt = sh->sh_size / sizeof(struct Elf64_Rela);
+                if (trace_reloc) trace("Relocations cnt %lu\n", reloc_cnt);
+                struct Elf64_Rela *entry = (struct Elf64_Rela *) ((void *)elf + sh->sh_offset);
+                for (size_t i = 0; i < reloc_cnt; i++, entry++) {
+                    if (entry->r_offset + load_offset < va || entry->r_offset + load_offset >= va + filesz) {
+                        continue;
+                    }
+                    int64_t *reloc_addr = (int64_t *) (entry->r_offset + load_offset);
+                    if (trace_reloc) trace("Reloc address (before loading) %lx, its content %lx, addent value %lx\n", entry->r_offset, *reloc_addr, entry->r_addend);
+                    *reloc_addr = entry->r_addend + load_offset;
+                }
+            }
+            if (sh->sh_type == ELF_SHT_REL) {
+                /*TODO*/
+            }
+        }
+    }
+    
+    return 0;
+}
+
+static int
+map_segment(uintptr_t va, size_t memsz, size_t filesz, long load_offset, struct Elf *elf, size_t offset, int perm) {
     int res = PAGE_OFFSET(va);
     if (res) {
         va -= res;
@@ -312,21 +354,20 @@ map_segment(struct AddressSpace *dst, uintptr_t va, size_t memsz, size_t filesz,
         filesz += res;
     }
     trace("Mapping into [%lx, %lx]\n", va, va + ROUNDUP(memsz, PAGE_SIZE));
-    if (map_region(dst, va, NULL, 0, ROUNDUP(memsz, PAGE_SIZE), PROT_RWX | PROT_USER_ | ALLOC_ZERO)) {
+    if (map_region(current_space, va, NULL, 0, ROUNDUP(memsz, PAGE_SIZE), PROT_RWX | PROT_USER_ | ALLOC_ZERO)) {
         trace("Failed to map segment\n");
         return -E_UNSPECIFIED;
     }
-    memcpy((void *) va, binary + offset, filesz);
-    if (map_region(dst, va, dst, va, ROUNDUP(memsz, PAGE_SIZE), (perm & 7) | PROT_USER_)) {
+    memcpy((void *) va, (void *) elf + offset, filesz);
+
+    if (elf->e_type == ET_DYN) {
+        fix_reloc(elf, load_offset, va, filesz);
+    }
+
+    if (map_region(current_space, va, current_space, va, ROUNDUP(memsz, PAGE_SIZE), (perm & 7) | PROT_USER_)) {
         trace("Failed to map segment\n");
         return -E_UNSPECIFIED;
     }
-    // trace("Mapping into [%lx, %lx]\n", va, va + ROUNDUP(memsz, PAGE_SIZE));
-    // map_region(dst, va, NULL, 0, ROUNDUP(memsz, PAGE_SIZE), PROT_RWX | PROT_USER_ | ALLOC_ZERO);
-
-    // memcpy((void *)va, binary + offset, filesz);
-
-    // map_region(dst, va, dst, va, ROUNDUP(memsz, PAGE_SIZE), (perm & 7) | PROT_USER_);
 
     return 0;
 }
@@ -356,17 +397,41 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
         return -E_INVALID_EXE;
     }
 
-    trace("Loading from kernel new exec in env [%lx]...\n", (uintptr_t) env);
+    trace("\nLoading new exec from kernel into env [%lx]...\n", (uintptr_t) env);
+    trace("[%lx] Type of ELF %s\n", (uintptr_t) env, elf->e_type == ET_EXEC ? "no-pie" : "pie");
 
-    unsigned long load_offset = 0;
-    if (elf->e_type == ET_DYN) {
-        //load_offset = UTEXT;
-    }
-
-    trace("[%lx] Type of ELF %d, entry %lx, offset %lx\n", (uintptr_t) env, elf->e_type, elf->e_entry, load_offset);
-
+    /* Must switch AS before loading image*/
     switch_address_space(&env->address_space);
-    struct Proghdr *ph = (void *)(binary + elf->e_phoff);
+
+    uintptr_t load_base = elf->e_entry;
+    long load_offset = 0;
+    uintptr_t stack_base = USER_STACK_TOP - USER_STACK_SIZE;
+    uintptr_t stack_top = USER_STACK_TOP;
+    long stack_offset = 0;
+    struct Proghdr *ph;
+#if ENABLE_ASLR
+    /* Use ASLR on entry point if PIE */
+    if (elf->e_type == ET_DYN) {
+        /* Calculate address range of program segments */
+        uintptr_t low_addr = UTEXT_MAX;
+        uintptr_t high_addr = UTEXT;
+        ph = (struct Proghdr *)(binary + elf->e_phoff);
+        for (size_t i = 0; i < elf->e_phnum; i++, ph++) {
+            if (ph->p_type != ELF_PROG_LOAD) continue;
+            low_addr = MIN(low_addr, ph->p_va);
+            high_addr = MAX(high_addr, ph->p_va + ph->p_memsz);
+        }
+        low_addr = ROUNDDOWN(low_addr, PAGE_SIZE);
+        high_addr = ROUNDUP(high_addr, PAGE_SIZE);
+
+        /* Get random address to load image at */
+        load_base = random_region_base(UTEXT, UTEXT_MAX, high_addr - low_addr);
+        load_offset = (long)load_base - elf->e_entry;
+        trace("[%lx] Image ASLR load address %lx\n", (uintptr_t) env, load_base);
+    }
+#endif
+
+    ph = (void *)(binary + elf->e_phoff);
     for (size_t i = 0; i < elf->e_phnum; i++, ph++) {
         if (ph->p_type != ELF_PROG_LOAD) continue;
         if (ph->p_filesz > ph->p_memsz) {
@@ -376,18 +441,13 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
             return -E_INVALID_EXE;
         }
 
-        // int perm = PROT_USER_;
-        // if (ph->p_flags & ELF_PROG_FLAG_WRITE) perm |= PROT_W;
-        // if (ph->p_flags & ELF_PROG_FLAG_READ) perm |= PROT_R;
-        // if (ph->p_flags & ELF_PROG_FLAG_EXEC) perm |= PROT_X;
-
         uintptr_t va = ph->p_va + load_offset;
-        trace("[%lx] Mapping segment [%lx, %lx] with perm %u\n", (uintptr_t) env, va, va + ph->p_memsz, ph->p_flags);
-        if (map_segment(current_space, va, ph->p_memsz, ph->p_filesz, binary, ph->p_offset, ph->p_flags)) {
+        trace("[%lx] Mapping segment sized [%lx, %lx] into [%lx, %lx] with perm %u\n", 
+            (uintptr_t) env, va, va + ph->p_memsz, ROUNDDOWN(va, PAGE_SIZE), ROUNDUP(va + ph->p_memsz, PAGE_SIZE), ph->p_flags);
+        if (map_segment(va, ph->p_memsz, ph->p_filesz, load_offset, elf, ph->p_offset, ph->p_flags)) {
             trace("[%lx] Failed to map a segment!!!\n", (uintptr_t) env);
             return -E_UNSPECIFIED;
         }
-
         
 #ifdef CONFIG_KSPACE
         if (bind_functions(env, binary, size, ph->p_va + load_offset, ph->p_va + load_offset + ph->p_memsz))
@@ -395,15 +455,22 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
 #endif
     }
 
-    map_region(current_space, USER_STACK_TOP - USER_STACK_SIZE, NULL, 0, USER_STACK_SIZE, PROT_R | PROT_W | PROT_USER_ | ALLOC_ZERO);
-    trace("[%lx] Mapped stack at [%llx, %llx]\n", (uintptr_t) env, USER_STACK_TOP - USER_STACK_SIZE, USER_STACK_TOP);
-    trace("[%lx] Stack pointer at %lx\n", (uintptr_t) env, env->env_tf.tf_rsp);
+    /* Map stack */
+#ifdef ENABLE_ASLR
+    stack_base = random_region_base(USER_STACK_BOTTOM, USER_STACK_TOP, USER_STACK_SIZE);
+    stack_top = stack_base + USER_STACK_SIZE;
+    stack_offset = (long) USER_STACK_TOP - stack_top;
+    trace("[%lx] Stack ASLR offset  %lx\n", (uintptr_t) env, stack_offset);
+#endif
+    map_region(current_space, stack_base, NULL, 0, USER_STACK_SIZE, PROT_R | PROT_W | PROT_USER_ | ALLOC_ZERO);
+    trace("[%lx] Mapped stack at [%lx, %lx]\n", (uintptr_t) env, stack_base, stack_top);
+    env->env_tf.tf_rsp = stack_top;
     
-    env->env_tf.tf_rip = elf->e_entry + load_offset;
+    /* Change entry address */
+    env->env_tf.tf_rip = load_base;
     trace("[%lx] Entry point at %lx\n", (uintptr_t) env, env->env_tf.tf_rip);
 
     // Lan 8_Done
-    switch_address_space(&kspace);
 
     /* NOTE: When merging origin/lab10 put this hunk at the end
      *       of the function, when user stack is already mapped. */
@@ -413,8 +480,12 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
         struct AddressSpace *as = switch_address_space(&env->address_space);
         env->env_tf.tf_rsp = make_fs_args((char *)env->env_tf.tf_rsp);
         switch_address_space(as);
+    } else {
+        env->env_tf.tf_rsp -= 2 * sizeof(uintptr_t);     // place dummy argc and argv at stack if no arguments
     }
+    trace("[%lx] Stack pointer at %lx\n", (uintptr_t) env, env->env_tf.tf_rsp);
 
+    switch_address_space(&kspace);
     return 0;
 }
 
