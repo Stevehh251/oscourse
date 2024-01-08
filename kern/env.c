@@ -352,6 +352,13 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
     map_region(current_space, USER_STACK_TOP - USER_STACK_SIZE, NULL, 0, USER_STACK_SIZE, PROT_R | PROT_W | PROT_USER_ | ALLOC_ZERO);
     env->env_tf.tf_rip = elf->e_entry;
 
+    map_region(&env->address_space, UCANARY, NULL, 0, PAGE_SIZE, PROT_R | PROT_W | PROT_USER_ | PROT_LAZY | ALLOC_ONE);
+
+    *(uint32_t*)UCANARY_VAL = 0xffffffff;
+    cprintf("Canary frame started at: %llx\n", UCANARY);
+    cprintf("Canary value address:  %llx\n", UCANARY_VAL);
+    cprintf("Canary value:  %x\n\n", *(uint32_t*)UCANARY_VAL);
+
     // Lan 8_Done
     switch_address_space(&kspace);
 
