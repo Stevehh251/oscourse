@@ -155,3 +155,8 @@ int
 sys_gettime(void) {
     return syscall(SYS_gettime, 0, 0, 0, 0, 0, 0, 0);
 }
+
+unsigned
+sys_rdrand(void) {
+    return syscall(SYS_rdrand, 0, 0, 0, 0, 0, 0, 0);
+}

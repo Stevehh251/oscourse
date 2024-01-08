@@ -19,83 +19,84 @@
 #define GD_KD32 0x20 /* kernel data 32bit */
 #define GD_UT   0x28 /* user text */
 #define GD_UD   0x30 /* user data */
-#define GD_TSS0 0x38 /* Task segment selector for CPU 0 */
+#define GD_GS   0x38 /* canary segment */
+#define GD_TSS0 0x40 /* Task segment selector for CPU 0 */
 
 /*
- * Virtual memory map:                                Permissions
- *                                                    kernel/user
- *
- *     1 TB -------->  +------------------------------+
- *                     |                              | RW/--
- *                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *                     :              .               : 0x1
- *                     :              .               :
- *                     :              .               :
- *                     |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~| RW/--
- *                     |                              | RW/--
- *                     |   Remapped Physical Memory   | RW/--
- *                     |                              | RW/--
- * KERN_BASE_ADDR,-->  +------------------------------+ 0x8040000000          <--+
- * KERN_STACK_TOP      |     CPU0's Kernel Stack      | RW/--  KERN_STACK_SIZE   |
- *                     | - - - - - - - - - - - - - - -|                          |
- *                     |      Invalid Memory (*)      | --/--  KERN_STACK_GAP    |
- *                     +------------------------------+                          |
- * KERN_PF_STACK_TOP-> |       CPU0's #PF Stack       | RW/--  KERN_PF_STACK_SIZE|
- *                     | - - - - - - - - - - - - - - -|                          |
- *                     |      Invalid Memory (*)      | --/--  KERN_STACK_GAP    |
- *                     +------------------------------+                          |
- *                     |     CPU1's Kernel Stack      | RW/--  KERN_STACK_SIZE   |
- *                     | - - - - - - - - - - - - - - -|                   HUGE_PAGE_SIZE
- *                     |      Invalid Memory (*)      | --/--  KERN_STACK_GAP    |
- *                     +------------------------------+                          |
- *                     :              .               :                          |
- *                     :              .               :                          |
- *  KERN_HEAP_END -->  +------------------------------+ 0x803fe00000          <--+
- *                     |       Memory-mapped I/O      | RW/--  HUGE_PAGE_SIZE
+					 * Virtual memory map:                                Permissions
+					 *                                                    kernel/user
+					 *
+					 *     1 TB -------->  +------------------------------+
+					 *                     |                              | RW/--
+					 *                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+					 *                     :              .               : 0x1
+					 *                     :              .               :
+					 *                     :              .               :
+					 *                     |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~| RW/--
+					 *                     |                              | RW/--
+					 *                     |   Remapped Physical Memory   | RW/--
+					 *                     |                              | RW/--
+					 * KERN_BASE_ADDR,-->  +------------------------------+ 0x8040000000    		--+
+					 * KERN_STACK_TOP      |     CPU0's Kernel Stack      | RW/--  KERN_STACK_SIZE    |
+					 *                     | - - - - - - - - - - - - - - -|                   		  |
+					 *                     |      Invalid Memory (*)      | --/--  KERN_STACK_GAP     |
+					 *                     +------------------------------+                  		  |
+			 *    KERN_PF_STACK_TOP        |       CPU0's #PF Stack       | RW/--  KERN_PF_STACK_SIZE |
+					 *                     | - - - - - - - - - - - - - - -|                   		  |
+					 *                     |      Invalid Memory (*)      | --/--  KERN_STACK_GAP     |
+					 *                     +------------------------------+                           |
+					 *                     |     CPU1's Kernel Stack      | RW/--  KERN_STACK_SIZE    |
+					 *                     | - - - - - - - - - - - - - - -|                            HUGE_PAGE_SIZE
+					 *                     |      Invalid Memory (*)      | --/--  KERN_STACK_GAP     |
+					 *                     +------------------------------+                           |
+					 *                     :              .               :                           |
+					 *                     :              .               :                           |
+					 *  KERN_HEAP_END -->  +------------------------------+ 0x803fe00000            --+
+					 *                     |       Memory-mapped I/O      | RW/--  HUGE_PAGE_SIZE
  * MAX_USER_READABLE, KERN_HEAP_START -->  +------------------------------+ 0x803fc00000
- *                     |          RO PAGES            | R-/R-
- *                     .                              .
- *                     .                              .        400 * HUGE_PAGE_SIZE
- *                     .                              .
- *                     |                              |
- * UENVS ----------->  +------------------------------+ 0x8000da0000
- *                     |                              |
- *                     |                              |
- *                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *                     .                              .
- *                     .                              .
- * MAX_USER_ADDRESS,               .                              .
- *USER_EXCEPTION_STACK_TOP +--------------------------+ 0x8000000000
- *                     |     User Exception Stack     | RW/RW  PAGE_SIZE
- *                     +------------------------------+ 0x7ffffff000
- *                     |       Empty Memory (*)       | --/--  PAGE_SIZE
- * USER_STACK_TOP -->  +------------------------------+ 0x7fffffe000
- *                     |      Normal User Stack       | RW/RW  PAGE_SIZE
- *                     +------------------------------+ 0x7fffffd000
- *                     |                              |
- *                     |                              |
- *                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *                     .                              .
- *                     .                              .
- *                     .                              .
- *                     |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|
- *                     |     Program Data & Heap      |
- *    UTEXT -------->  +------------------------------+ 0x00800000
- *                     |       Empty Memory (*)       |        2* HUGE_PAGE_SIZE
- *                     |                              |
- *    UTEMP -------->  +------------------------------+ 0x00400000      --+
- *                     |       Empty Memory (*)       |                   |
- *                     | - - - - - - - - - - - - - - -|                   |
- *                     |  User STAB Data (optional)   |                2* HUGE_PAGE_SIZE
- *    USTABDATA ---->  +------------------------------+ 0x00200000        |
- *                     |       Empty Memory (*)       |                   |
- *    0 ------------>  +------------------------------+                 --+
- *
- * (*) Note: The kernel ensures that "Invalid Memory" (MAX_USER_READABLE) is *never*
- *     mapped.  "Empty Memory" is normally unmapped, but user programs may
- *     map pages there if desired.  JOS user programs map pages temporarily
- *     at UTEMP.
- */
+					 *                     |          RO PAGES            | R-/R-
+					 *                     .                              .
+					 *                     .                              .        400 * HUGE_PAGE_SIZE
+					 *                     .                              .
+					 *                     |                              |
+					 * UENVS ----------->  +------------------------------+ 0x8000da0000
+					 *                     |                              |
+					 *                     |                              |
+					 *                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+					 *                     .                              .
+					 *                     .                              .
+					 * MAX_USER_ADDRESS,   .                              .
+				 *USER_EXCEPTION_STACK_TOP +------------------------------+ 0x8000000000
+					 *                     |     User Exception Stack     | RW/RW  PAGE_SIZE
+					 *                     +------------------------------+ 0x7ffffff000
+					 *                     |       Empty Memory (*)       | --/--  PAGE_SIZE
+					 * USER_STACK_TOP -->  +------------------------------+ 0x7fffffe000
+					 *                     |      Normal User Stack       | RW/RW  PAGE_SIZE
+					 *                     +------------------------------+ 0x7fffffd000
+					 *                     |                              |
+					 *                     |                              |
+					 *                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+					 *                     .                              .
+					 *                     .                              .
+					 *                     .                              .
+					 *                     |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|
+					 *                     |     Program Data & Heap      |
+					 *    UTEXT -------->  +------------------------------+ 0x00800000
+					 *                     |       Empty Memory (*)       |        2* HUGE_PAGE_SIZE
+					 *                     |                              |
+					 *    UTEMP -------->  +------------------------------+ 0x00400000      --+
+					 *                     |       Empty Memory (*)       |                   |
+					 *                     | - - - - - - - - - - - - - - -|                   |
+					 *                     |  User STAB Data (optional)   |                2* HUGE_PAGE_SIZE
+					 *    USTABDATA ---->  +------------------------------+ 0x00200000        |
+					 *                     |       Empty Memory (*)       |                   |
+					 *    0 ------------>  +------------------------------+                 --+
+					 *
+					 * (*) Note: The kernel ensures that "Invalid Memory" (MAX_USER_READABLE) is *never*
+					 *     mapped.  "Empty Memory" is normally unmapped, but user programs may
+					 *     map pages there if desired.  JOS user programs map pages temporarily
+					 *     at UTEMP.
+*/
 
 /* All physical memory mapped at this address
  * (this *should* be defined as a literal number) */
@@ -160,9 +161,17 @@
 #define USER_EXCEPTION_STACK_TOP MAX_USER_ADDRESS
 /* Size of exception stack (must be one page for now) */
 #define USER_EXCEPTION_STACK_SIZE (8 * PAGE_SIZE)
+/* 
+    Canary page.
+    Offset 0x28 required by clang -fstack-protector.
+    See disassembled filed with canary inserted.
+    (Stack protected by fs:0x28)
+*/
+#define UCANARY     (USER_EXCEPTION_STACK_TOP - USER_EXCEPTION_STACK_SIZE)
+#define UCANARY_VAL (UCANARY + 0x28)
 /* Top of normal user stack */
 /* Next page left invalid to guard against exception stack overflow; then: */
-#define USER_STACK_TOP (USER_EXCEPTION_STACK_TOP - USER_EXCEPTION_STACK_SIZE - PAGE_SIZE)
+#define USER_STACK_TOP (UCANARY - PAGE_SIZE)
 /* Stack size (variable) */
 #define USER_STACK_SIZE (16 * PAGE_SIZE)
 /* Max number of open files in the file system at once */

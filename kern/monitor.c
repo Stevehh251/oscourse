@@ -18,6 +18,8 @@
 #include <kern/pmap.h>
 #include <kern/trap.h>
 
+// #include <kern/rdrand.h>
+
 #define WHITESPACE "\t\r\n "
 #define MAXARGS    16
 
@@ -33,6 +35,7 @@ int mon_frequency(int argc, char **argv, struct Trapframe *tf);
 int mon_memory(int argc, char **argv, struct Trapframe *tf);
 int mon_pagetable(int argc, char **argv, struct Trapframe *tf);
 int mon_virt(int argc, char **argv, struct Trapframe *tf);
+int mon_rdrand(int argc, char **argv, struct Trapframe *tf);
 
 struct Command {
     const char *name;
@@ -53,10 +56,17 @@ static struct Command commands[] = {
         {"memory", "Display allocated memory pages", mon_memory},
         {"pagetable", "Display current page table", mon_pagetable},
         {"virt", "Display virtual memory tree", mon_virt},
+        // {"rdrand", "Display random number", mon_rdrand}
 };
 #define NCOMMANDS (sizeof(commands) / sizeof(commands[0]))
 
 /* Implementations of basic kernel monitor commands */
+
+// int 
+// mon_rdrand(int argc, char **argv, struct Trapframe *tf) {
+//     cprintf("%u\n", rdrand());
+//     return 0;
+// }
 
 int
 print_some_text(int argc, char **argv, struct Trapframe *tf) {
