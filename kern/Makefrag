@@ -35,6 +35,7 @@ KERN_SRCFILES := kern/bootstrap.S \
 			kern/tsc.c \
 			kern/uefi.c \
 			kern/uefiasm.S \
+			kern/rdrand.c \
 			kern/spinlock.c
 
 ifeq ($(CONFIG_KSPACE),y)
@@ -120,7 +121,9 @@ KERN_BINFILES :=	user/hello \
 			user/vdate \
 			user/bounds \
 			user/implicitconv \
-			user/signedoverflow
+			user/signedoverflow\
+			user/testcanary\
+			user/rdrand
 KERN_BINFILES := $(patsubst %, $(OBJDIR)/%, $(KERN_BINFILES))
 endif
 

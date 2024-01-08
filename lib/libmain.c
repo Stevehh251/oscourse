@@ -3,6 +3,7 @@
 
 #include <inc/lib.h>
 #include <inc/x86.h>
+#include <kern/rdrand.h>
 
 extern void umain(int argc, char **argv);
 
@@ -12,6 +13,40 @@ const char *binaryname = "<unknown>";
 #ifdef JOS_PROG
 void (*volatile sys_exit)(void);
 #endif
+
+uintptr_t __stack_chk_guard;
+
+__attribute__((no_stack_protector)) 
+uintptr_t __stack_chk_guard_init(void)
+{   
+    if (UINTPTR_MAX == UINT32_MAX){
+        return (uintptr_t)sys_rdrand();
+    }else{
+        return ((uintptr_t)sys_rdrand() << 32) + (uintptr_t)sys_rdrand();
+    }
+}
+
+
+void __attribute__((no_stack_protector, constructor)) 
+__construct_stk_chk_guard()
+{
+    if(__stack_chk_guard == 0)
+    {
+        __stack_chk_guard = __stack_chk_guard_init();
+    }
+}
+
+__attribute__((no_stack_protector, noreturn))
+void __stack_chk_fail(void)
+{
+    panic("Canary check failed: expected %lx", __stack_chk_guard);
+}
+
+void __attribute__ ((no_stack_protector, noreturn))
+__stack_chk_fail_local (void)
+{
+    __stack_chk_fail();
+}
 
 void
 libmain(int argc, char **argv) {

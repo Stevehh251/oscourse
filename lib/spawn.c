@@ -249,6 +249,19 @@ init_stack(envid_t child, const char **argv, struct Trapframe *tf) {
      * and unmap it from ours! */
     if (sys_map_region(0, UTEMP, child, (void *)(USER_STACK_TOP - USER_STACK_SIZE),
                        USER_STACK_SIZE, PROT_RW) < 0) goto error;
+    
+    /* Create frame for canary */
+    if ((res = sys_alloc_region(0, UTEMP, PAGE_SIZE, PTE_P|PTE_U|PTE_W)) < 0) {
+        return res;
+    }
+    *(uint32_t*)(UCANARY_VAL - UCANARY + UTEMP) = *(uint32_t*)UCANARY_VAL;
+    if ((res = sys_map_region(0, UTEMP, child, (void*)UCANARY,PAGE_SIZE, PTE_P|PTE_U)) < 0) {
+        sys_unmap_region(0, UTEMP, PAGE_SIZE);
+        return res;
+    }
+    if ((res = sys_unmap_region(0, UTEMP, PAGE_SIZE)) < 0) {
+        return res;
+    }
 error:
     if (sys_unmap_region(0, UTEMP, USER_STACK_SIZE) < 0) goto error;
     return res;
