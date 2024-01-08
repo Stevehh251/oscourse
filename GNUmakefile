@@ -98,7 +98,7 @@ GCCPREFIX := $(shell if PATH="$$ISP_PATH:$$PATH" x86_64-ispras-elf-objdump -i 2>
 	echo "***" 1>&2; exit 1; fi)
 endif
 
-CC	:= $(GCCPREFIX)gcc -fno-pic -pipe
+CC	:= $(GCCPREFIX)gcc -pipe
 AS	:= $(GCCPREFIX)as
 AR	:= $(GCCPREFIX)ar
 LD	:= $(GCCPREFIX)ld
@@ -154,6 +154,9 @@ CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 &
 CFLAGS += $(EXTRA_CFLAGS)
 CFLAGS += -mno-sse -mno-sse2 -mno-mmx
 
+ifdef ENABLE_ASLR
+CFLAGS += -DENABLE_ASLR
+endif
 
 KERN_SAN_CFLAGS :=
 KERN_SAN_LDFLAGS :=

@@ -70,16 +70,32 @@ lib/random_data.c:
 	@mkdir -p $(@D)
 	xxd -i -l 100 /dev/urandom $@
 
+# no-pie
 $(OBJDIR)/lib/%.o: lib/%.c $(OBJDIR)/.vars.USER_CFLAGS
 	@echo + cc[USER] $<
 	@mkdir -p $(@D)
 	$(V)$(CC) $(USER_CFLAGS) $(USER_SAN_CFLAGS) -c -o $@ $<
+	$(V)$(OBJDUMP) -S $@ > $@.asm
 
 $(OBJDIR)/lib/%.o: lib/%.S $(OBJDIR)/.vars.USER_CFLAGS
 	@echo + as[USER] $<
 	@mkdir -p $(@D)
 	$(V)$(CC) $(USER_CFLAGS) $(USER_SAN_CFLAGS) -c -o $@ $<
+	$(V)$(OBJDUMP) -S $@ > $@.asm
 
 $(OBJDIR)/lib/libjos.a: $(LIB_OBJFILES)
 	@echo + ar $@
 	$(V)$(AR) r $@ $(LIB_OBJFILES)
+
+# pie
+$(OBJDIR)/lib/%.o.pie: lib/%.c $(OBJDIR)/.vars.USER_CFLAGS
+	@echo + cc[USER] $<
+	@mkdir -p $(@D)
+	$(V)$(CC) $(USER_CFLAGS) $(USER_SAN_CFLAGS) -fPIE -c -o $@ $<
+	$(V)$(OBJDUMP) -S $@ > $@.asm
+
+$(OBJDIR)/lib/%.o.pie: lib/%.S $(OBJDIR)/.vars.USER_CFLAGS
+	@echo + as[USER] $<
+	@mkdir -p $(@D)
+	$(V)$(CC) $(USER_CFLAGS) $(USER_SAN_CFLAGS) -fPIE -c -o $@ $<
+	$(V)$(OBJDUMP) -S $@ > $@.asm

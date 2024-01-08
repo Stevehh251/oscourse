@@ -2,6 +2,20 @@ OBJDIRS += user
 
 USERLIBS = jos
 
+# USER_PIE_SRC := #user/hello.c \
+# 			#user/rdrand.c \
+
+# USER_NOPIE_SRC := $(wildcard user/*.c)
+
+# USER_PIE_OBJ := $(patsubst user/%.c, $(OBJDIR)/user/%.o, $(USER_PIE_SRC))
+# USER_NOPIE_OBJ := $(patsubst user/%.c, $(OBJDIR)/user/%.o, $(USER_NOPIE_SRC))
+
+# USER_PIE := $(patsubst user/%.c, $(OBJDIR)/user/%, $(USER_PIE_SRC))
+# USER_NOPIE := $(patsubst user/%.c, $(OBJDIR)/user/%, $(USER_NOPIE_SRC))
+
+
+
+# no-pie
 $(OBJDIR)/user/%.o: user/%.c $(OBJDIR)/.vars.USER_CFLAGS
 	@echo + cc[USER] $<
 	@mkdir -p $(@D)
@@ -9,7 +23,67 @@ $(OBJDIR)/user/%.o: user/%.c $(OBJDIR)/.vars.USER_CFLAGS
 
 $(OBJDIR)/user/%: $(OBJDIR)/user/%.o $(OBJDIR)/lib/entry.o $(USERLIBS:%=$(OBJDIR)/lib/lib%.a) $(USER_EXTRA_OBJFILES) user/user.ld
 	@echo + ld $@
-	$(V)$(LD) -o $@ $(ULDFLAGS) $(LDFLAGS) $(USER_SAN_LDFLAGS) -nostdlib $(OBJDIR)/lib/entry.o $(USER_EXTRA_OBJFILES) $@.o -L$(OBJDIR)/lib $(USERLIBS:%=-l%) $(GCC_LIB)
+	$(V)$(LD) -o $@ $(ULDFLAGS) $(LDFLAGS) $(USER_SAN_LDFLAGS) -nostdlib $(OBJDIR)/lib/entry.o $(USER_EXTRA_OBJFILES) $@.o -L$(OBJDIR)/lib $(USERLIBS:%=-l%)
 	$(V)$(OBJDUMP) -S $@ > $@.asm
 	$(V)$(NM) -n $@ > $@.sym
+
+# pie
+$(OBJDIR)/user/hello.o: user/hello.c $(OBJDIR)/.vars.USER_CFLAGS
+	@echo + cc[USER] pie $<
+	@mkdir -p $(@D)
+	$(V)$(CC) -fPIE $(USER_CFLAGS) $(USER_SAN_CFLAGS) -c -o $@ $<
+
+$(OBJDIR)/user/hello: $(OBJDIR)/user/hello.o $(OBJDIR)/lib/entry.o.pie $(LIB_OBJFILES:%=%.pie) $(USER_EXTRA_OBJFILES) user/user.ld
+	@echo + ld pie $@
+	$(V)$(LD) -pie -o $@ $(ULDFLAGS) $(LDFLAGS) $(USER_SAN_LDFLAGS) -nostdlib $(OBJDIR)/lib/entry.o.pie $@.o $(LIB_OBJFILES:%=%.pie) $(USER_EXTRA_OBJFILES)
+	$(V)$(OBJDUMP) -S $@ > $@.asm
+	$(V)$(NM) -n $@ > $@.sym
+
+$(OBJDIR)/user/date.o: user/date.c $(OBJDIR)/.vars.USER_CFLAGS
+	@echo + cc[USER] pie $<
+	@mkdir -p $(@D)
+	$(V)$(CC) -fPIE $(USER_CFLAGS) $(USER_SAN_CFLAGS) -c -o $@ $<
+
+$(OBJDIR)/user/date: $(OBJDIR)/user/date.o $(OBJDIR)/lib/entry.o.pie $(LIB_OBJFILES:%=%.pie) $(USER_EXTRA_OBJFILES) user/user.ld
+	@echo + ld pie $@
+	$(V)$(LD) -pie -o $@ $(ULDFLAGS) $(LDFLAGS) $(USER_SAN_LDFLAGS) -nostdlib $(OBJDIR)/lib/entry.o.pie $@.o $(LIB_OBJFILES:%=%.pie) $(USER_EXTRA_OBJFILES)
+	$(V)$(OBJDUMP) -S $@ > $@.asm
+	$(V)$(NM) -n $@ > $@.sym
+
+$(OBJDIR)/user/rdrand.o: user/rdrand.c $(OBJDIR)/.vars.USER_CFLAGS
+	@echo + cc[USER] pie $<
+	@mkdir -p $(@D)
+	$(V)$(CC) -fPIE $(USER_CFLAGS) $(USER_SAN_CFLAGS) -c -o $@ $<
+
+$(OBJDIR)/user/rdrand: $(OBJDIR)/user/rdrand.o $(OBJDIR)/lib/entry.o.pie $(LIB_OBJFILES:%=%.pie) $(USER_EXTRA_OBJFILES) user/user.ld
+	@echo + ld pie $@
+	$(V)$(LD) -pie -o $@ $(ULDFLAGS) $(LDFLAGS) $(USER_SAN_LDFLAGS) -nostdlib $(OBJDIR)/lib/entry.o.pie $@.o $(LIB_OBJFILES:%=%.pie) $(USER_EXTRA_OBJFILES)
+	$(V)$(OBJDUMP) -S $@ > $@.asm
+	$(V)$(NM) -n $@ > $@.sym
+
+# no-pie
+# $(USER_NOPIE_OBJ): $($@:$(OBJDIR)/%.o=%.c) $(OBJDIR)/.vars.USER_CFLAGS
+# 	@echo + cc[USER] no-pie $@ $<
+# 	@mkdir -p $(@D)
+# 	$(V)$(CC) $(USER_CFLAGS) $(USER_SAN_CFLAGS) -c -o $@ $<
+# 	$(V)$(OBJDUMP) -S $@ > $@.asm
+
+# $(USER_NOPIE): $($@:%=%.o) $(OBJDIR)/lib/entry.o $(USERLIBS:%=$(OBJDIR)/lib/lib%.a) $(USER_EXTRA_OBJFILES) user/user.ld
+# 	@echo + ld no-pie $@
+# 	$(V)$(LD) -o $@ $(ULDFLAGS) $(LDFLAGS) $(USER_SAN_LDFLAGS) -nostdlib $(OBJDIR)/lib/entry.o $(USER_EXTRA_OBJFILES) $@.o -L$(OBJDIR)/lib $(USERLIBS:%=-l%) $(GCC_LIB)
+# 	$(V)$(OBJDUMP) -S $@ > $@.asm
+# 	$(V)$(NM) -n $@ > $@.sym
+
+# #pie
+# $(USER_PIE_OBJ): $(USER_PIE_SRC) $(OBJDIR)/.vars.USER_CFLAGS
+# 	@echo + cc[USER] pie $@
+# 	@mkdir -p $(@D)
+# 	$(V)$(CC) $(USER_CFLAGS) $(USER_SAN_CFLAGS) -fPIE -c -o $@ $<
+# 	$(V)$(OBJDUMP) -S $@ > $@.asm
+
+# $(USER_PIE): $(USER_PIE_OBJ) $(OBJDIR)/lib/entry.o.pie $(LIB_OBJFILES:%=%.pie) $(USER_EXTRA_OBJFILES) user/user.ld
+# 	@echo + ld pie $@
+# 	$(V)$(LD) -pie -o $@ $(ULDFLAGS) $(LDFLAGS) $(USER_SAN_LDFLAGS) -nostdlib $(OBJDIR)/lib/entry.o.pie $@.o $(LIB_OBJFILES:%=%.pie) $(USER_EXTRA_OBJFILES)
+# 	$(V)$(OBJDUMP) -S $@ > $@.asm
+# 	$(V)$(NM) -n $@ > $@.sym
 

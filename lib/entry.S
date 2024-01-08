@@ -27,8 +27,11 @@
 .text
 .globl _start
 _start:
-    # See if we were started with arguments on the stack
+    
+/* 
+ *      Now kernel pushes dummy arguments itself because we don't know actual user_stack_top here
 
+# See if we were started with arguments on the stack
 #ifndef CONFIG_KSPACE
     movabs $USER_STACK_TOP, %rax
     cmpq %rax, %rsp
@@ -41,6 +44,8 @@ _start:
     # Marking argc and argv as zero.
     pushq $0
     pushq $0
+*/    
+
 
 args_exist:
     movq 8(%rsp), %rsi

@@ -18,6 +18,7 @@
 #include <kern/kclock.h>
 #include <kern/kdebug.h>
 #include <kern/traceopt.h>
+#include <kern/rdrand.h>
 
 void
 timers_init(void) {
@@ -166,6 +167,13 @@ i386_init(void) {
     ENV_CREATE_KERNEL_TYPE(prog_test5);
     ENV_CREATE_KERNEL_TYPE(prog_test6);
 #else
+
+#ifdef ENABLE_ASLR
+    if (!check_rdrand_available()) {
+        panic("RDrand is not available\n");
+    }
+    cprintf("ASLR enabled\n");
+#endif
 
 #if LAB >= 10
     ENV_CREATE(fs_fs, ENV_TYPE_FS);

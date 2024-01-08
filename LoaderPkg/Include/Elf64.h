@@ -59,6 +59,17 @@ struct Elf64_Sym {
   UINT64            st_size;
 };
 
+struct Elf64_Rel {
+  UINT64 r_offset;
+  UINT64 r_info;
+};
+
+struct Elf64_Rela {
+  UINT64 r_offset;
+  UINT64 r_info;
+  INT64 r_addend;
+};
+
 /* Values for e_type. */
 #define ET_NONE    0  /* Unknown type. */
 #define ET_REL    1  /* Relocatable. */
@@ -157,6 +168,10 @@ struct Elf64_Sym {
 #define ELF_SHT_PROGBITS        1
 #define ELF_SHT_SYMTAB          2
 #define ELF_SHT_STRTAB          3
+#define ELF_SHT_RELA            4
+#define ELF_SHT_DYNAMIC         6
+#define ELF_SHT_REL             9
+#define ELF_SHT_DYNSYM          11
 
 /* Values for Secthdr::sh_name */
 #define ELF_SHN_UNDEF           0
