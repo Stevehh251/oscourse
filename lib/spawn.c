@@ -112,7 +112,6 @@ spawn(const char *prog, const char **argv) {
 
     struct Proghdr *ph;
 
-    uintptr_t load_base = elf->e_entry;
     long load_offset = 0;
 #if ENABLE_ASLR
     /* Use ASLR on entry point if PIE */
@@ -130,7 +129,7 @@ spawn(const char *prog, const char **argv) {
         high_addr = ROUNDUP(high_addr, PAGE_SIZE);
 
         /* Get random offset to load image at */
-        load_base = random_region_base(UTEXT, UTEXT_MAX, high_addr - low_addr);
+        uintptr_t load_base = random_region_base(UTEXT, UTEXT_MAX, high_addr - low_addr);
         load_offset = load_base - elf->e_entry;
         trace("[%d] Image ASLR load base %lx\n", child, load_base);
     }
@@ -162,6 +161,12 @@ spawn(const char *prog, const char **argv) {
     trace("[%d] Entry at %lx\n", child, child_tf.tf_rip);
 
     if ((res = init_stack(child, argv, &child_tf)) < 0) goto error;
+
+#ifdef SAN_ENABLE_UASAN
+    res = sys_alloc_region(child, (void *) SANITIZE_USER_SHADOW_BASE, SANITIZE_USER_SHADOW_SIZE, PTE_U | PTE_W | PTE_P);
+    if (res)
+        return res;
+#endif
 
     close(fd);
 

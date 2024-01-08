@@ -407,7 +407,6 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
     long load_offset = 0;
     uintptr_t stack_base = USER_STACK_TOP - USER_STACK_SIZE;
     uintptr_t stack_top = USER_STACK_TOP;
-    long stack_offset = 0;
     struct Proghdr *ph;
 #if ENABLE_ASLR
     /* Use ASLR on entry point if PIE */
@@ -459,8 +458,7 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
 #ifdef ENABLE_ASLR
     stack_base = random_region_base(USER_STACK_BOTTOM, USER_STACK_TOP, USER_STACK_SIZE);
     stack_top = stack_base + USER_STACK_SIZE;
-    stack_offset = (long) USER_STACK_TOP - stack_top;
-    trace("[%lx] Stack ASLR offset  %lx\n", (uintptr_t) env, stack_offset);
+    trace("[%lx] Stack ASLR offset  %lx\n", (uintptr_t) env, (long) USER_STACK_TOP - stack_top);
 #endif
     map_region(current_space, stack_base, NULL, 0, USER_STACK_SIZE, PROT_R | PROT_W | PROT_USER_ | ALLOC_ZERO);
     trace("[%lx] Mapped stack at [%lx, %lx]\n", (uintptr_t) env, stack_base, stack_top);
@@ -469,7 +467,10 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
     /* Change entry address */
     env->env_tf.tf_rip = load_base;
     trace("[%lx] Entry point at %lx\n", (uintptr_t) env, env->env_tf.tf_rip);
-
+    
+#ifdef SAN_ENABLE_UASAN
+    map_region(current_space, SANITIZE_USER_SHADOW_BASE, NULL, 0, SANITIZE_USER_SHADOW_SIZE, PROT_R | PROT_W | PROT_USER_ | ALLOC_ZERO);
+#endif
     // Lan 8_Done
 
     /* NOTE: When merging origin/lab10 put this hunk at the end
