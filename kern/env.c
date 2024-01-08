@@ -20,6 +20,8 @@
 #include <kern/trap.h>
 #include <kern/vsyscall.h>
 
+#include <kern/rdrand.h>
+
 /* Currently active environment */
 struct Env *curenv = NULL;
 
@@ -354,7 +356,8 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
 
     map_region(&env->address_space, UCANARY, NULL, 0, PAGE_SIZE, PROT_R | PROT_W | PROT_USER_ | PROT_LAZY | ALLOC_ONE);
 
-    *(uint32_t*)UCANARY_VAL = 0xffffffff;
+
+    *(uint32_t*)UCANARY_VAL = rdrand();
     cprintf("Canary frame started at: %llx\n", UCANARY);
     cprintf("Canary value address:  %llx\n", UCANARY_VAL);
     cprintf("Canary value:  %x\n\n", *(uint32_t*)UCANARY_VAL);
