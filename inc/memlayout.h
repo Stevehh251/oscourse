@@ -67,12 +67,12 @@
 					 *                     .                              .
 					 * MAX_USER_ADDRESS,   .                              .
 				 *USER_EXCEPTION_STACK_TOP +------------------------------+ 0x8000000000
-					 *                     |     User Exception Stack     | RW/RW  PAGE_SIZE
-					 *                     +------------------------------+ 0x7ffffff000
-					 *                     |       Empty Memory (*)       | --/--  PAGE_SIZE
-					 * USER_STACK_TOP -->  +------------------------------+ 0x7fffffe000
+					 *                     |     User Exception Stack     | RW/RW  8 * PAGE_SIZE
+					 *                     +------------------------------+ 0x7fffff8000
+					 *                     |      Canary stack frame      | --/--  PAGE_SIZE
+					 * USER_STACK_TOP -->  +------------------------------+ 0x7fffff7000
 					 *                     |      Normal User Stack       | RW/RW  PAGE_SIZE
-					 *                     +------------------------------+ 0x7fffffd000
+					 *                     +------------------------------+ 0x7fffff6000
 					 *                     |                              |
 					 *                     |                              |
 					 *                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -167,7 +167,7 @@
     See disassembled filed with canary inserted.
     (Stack protected by fs:0x28)
 */
-#define UCANARY     (USER_EXCEPTION_STACK_TOP - USER_EXCEPTION_STACK_SIZE)
+#define UCANARY     (USER_EXCEPTION_STACK_TOP - USER_EXCEPTION_STACK_SIZE - PAGE_SIZE)
 #define UCANARY_VAL (UCANARY + 0x28)
 /* Top of normal user stack */
 /* Next page left invalid to guard against exception stack overflow; then: */

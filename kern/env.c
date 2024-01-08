@@ -473,6 +473,9 @@ load_icode(struct Env *env, uint8_t *binary, size_t size) {
 #endif
     map_region(&env->address_space, UCANARY, NULL, 0, PAGE_SIZE, PROT_R | PROT_W | PROT_USER_ | PROT_LAZY | ALLOC_ONE);
 
+#ifdef SAN_ENABLE_KASAN
+    platform_asan_unpoison((void *)UCANARY, PAGE_SIZE);
+#endif
 
     *(uint32_t*)UCANARY_VAL = rdrand();
     cprintf("Canary frame started at: %llx\n", UCANARY);
